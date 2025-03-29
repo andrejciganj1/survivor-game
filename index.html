@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vampire Survivors Clone</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        #gameCanvas {
+            border: 1px solid #333;
+            background-color: #111;
+            display: block;
+            margin: 0 auto;
+        }
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 18px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: red;
+            font-size: 48px;
+            text-align: center;
+            display: none;
+        }
+        #levelUp {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            border: 2px solid #444;
+            border-radius: 10px;
+            padding: 20px;
+            color: white;
+            text-align: center;
+            width: 300px;
+            display: none;
+        }
+        .upgrade {
+            margin: 10px;
+            padding: 10px;
+            background-color: #222;
+            border: 1px solid #555;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .upgrade:hover {
+            background-color: #333;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <div id="ui">
+        <div id="level">Level: 1</div>
+        <div id="xp">XP: 0 / 100</div>
+        <div id="health">Health: 100</div>
+        <div id="movementSpeed">Movement Speed: 200</div>
+        <div id="kills">Kills: 0</div>
+        <div id="time">Time: 0:00</div>
+        <div id="enemyInfo" style="margin-top: 10px; border-top: 1px solid #444; padding-top: 5px;">
+            <div style="font-weight: bold;">Enemy Info:</div>
+            <div id="enemyCount">Enemies: 0</div>
+            <div id="enemyHealth">Average Health: 0</div>
+            <div id="enemySpeed">Average Speed: 0</div>
+        </div>
+        <div id="weaponInfo" style="margin-top: 10px; border-top: 1px solid #444; padding-top: 5px;">
+            <!-- Weapon info will be populated by JavaScript -->
+        </div>
+    </div>
+    <div id="gameOver">
+        <div>GAME OVER</div>
+        <div id="finalScore" style="font-size: 24px; margin-top: 20px;">Kills: 0</div>
+        <div id="restart" style="font-size: 24px; margin-top: 20px; cursor: pointer; text-decoration: underline;">Restart</div>
+    </div>
+    <div id="levelUp">
+        <h2>Level Up!</h2>
+        <div id="upgradeOptions"></div>
+    </div>
+    
+    <script src="game.js"></script>
+</body>
+</html> 
