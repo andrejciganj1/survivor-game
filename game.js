@@ -2,19 +2,40 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
+// Player position tracking for fullscreen toggle
+let lastPlayerPosition = null;
+
 // Set canvas size to match window size
 function resizeCanvas() {
+    // Store player position before resize if player exists
+    if (typeof player !== 'undefined' && player) {
+        lastPlayerPosition = {
+            x: player.x,
+            y: player.y
+        };
+    }
+    
+    // Update canvas dimensions
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
     
-    // Reset player position to center when resizing
-    if (typeof player !== 'undefined' && player) {
+    // Restore player position if we have a saved position
+    if (lastPlayerPosition && typeof player !== 'undefined' && player) {
+        player.x = lastPlayerPosition.x;
+        player.y = lastPlayerPosition.y;
+        
+        // Make sure player stays within bounds
+        const margin = 20;
+        player.x = Math.max(margin, Math.min(canvas.width - margin, player.x));
+        player.y = Math.max(margin, Math.min(canvas.height - margin, player.y));
+    } else if (typeof player !== 'undefined' && player) {
+        // If no saved position (first time), center player
         player.x = canvas.width / 2;
         player.y = canvas.height / 2;
     }
 }
 
-// Add resize event listener
+// Listen for window resize
 window.addEventListener('resize', resizeCanvas);
 
 // Initial canvas sizing without player repositioning
@@ -121,8 +142,8 @@ const enemyTypes = [
         projectileSize: 8
     },
     {
-        name: 'Boss',
-        speed: 30,
+        name: 'Elite',
+        speed: 35,
         health: 1000,
         damage: 30,
         size: 60,
@@ -133,8 +154,46 @@ const enemyTypes = [
         spawnMessage: true, // Show message when spawned
         // Boss can periodically spawn minions
         canSpawnMinions: true,
-        minionSpawnCooldown: 5000, // Spawn minions every 5 seconds
-        minionType: 0 // Index of zombie in enemyTypes
+        minionSpawnCooldown: 3000, // Spawn minions every 3 seconds
+        minionType: 4, // Index of archer in enemyTypes (changed from 0/zombie to 4/archer)
+        // Laser attack
+        canFireLaser: true,
+        laserCooldown: 5000, // Fire laser every 5 seconds
+        laserRange: 3000,
+        laserDamage: 25,
+        laserWidth: 10,
+        laserColor: '#f22',
+        laserDuration: 1500
+    },
+    {
+        name: 'Uber',
+        speed: 20,
+        health: 5000,
+        damage: 40,
+        size: 100,
+        color: '#90c',
+        xpValue: 1000,
+        attackCooldown: 2000,
+        isUber: true,
+        isBoss: true,
+        spawnMessage: true,
+        // Special ability to spawn elites
+        canSpawnBosses: true,
+        bossSpawnCooldown: 10000, // Spawn elites every 10 seconds
+        bossType: 5, // Index of Elite type in enemyTypes
+        // Explosion ability
+        canExplode: true,
+        explosionCooldown: 5000, // Explode every 5 seconds
+        explosionRadius: 200,
+        explosionDamage: 40,
+        // Laser attack (more powerful than Elite)
+        canFireLaser: true,
+        laserCooldown: 7000, // Fire laser less frequently
+        laserRange: 3000,
+        laserDamage: 40,
+        laserWidth: 15,
+        laserColor: '#f0f',
+        laserDuration: 2500
     }
 ];
 
@@ -156,12 +215,20 @@ const keys = {
 // XP Orbs
 const xpOrbs = [];
 
+// Health Potions
+const healthPotions = [];
+const potionSpawnInterval = 60000; // Spawn a potion every minute
+let lastPotionSpawn = -potionSpawnInterval; // Start negative so first potion spawns after exactly 1 minute
+
 // Track game time for enemy spawning
 let lastEnemySpawn = 0;
 let enemySpawnRate = 1000; // milliseconds
 
 // Track enemy projectiles
 const enemyProjectiles = [];
+
+// Track active laser beams
+const activeLasers = [];
 
 // Setup control event listeners
 function setupControlEventListeners() {
@@ -187,6 +254,36 @@ function handleKeyDown(e) {
         player.xp += 100;
         playerModule.checkLevelUp(player, gameState, GAME_STATE);
         updateUI(player);
+    }
+    
+    // Spawn an elite enemy when pressing 'x'
+    if (e.key === 'x' && gameState.current === GAME_STATE.RUNNING) {
+        const uberType = enemyTypes[6]; // Uber is index 6
+        
+        // Spawn near the player, but with some distance
+        const angle = Math.random() * Math.PI * 2;
+        const distance = 200; // Spawn 200 pixels away
+        const spawnX = player.x + Math.cos(angle) * distance;
+        const spawnY = player.y + Math.sin(angle) * distance;
+        
+        // Create the uber enemy
+        const uber = {
+            x: spawnX,
+            y: spawnY,
+            type: uberType,
+            health: uberType.health,
+            width: uberType.size,
+            height: uberType.size,
+            speed: uberType.speed,
+            damage: uberType.damage,
+            lastAttack: 0,
+            attackCooldown: uberType.attackCooldown,
+            lastMinionSpawn: 0,
+            xpValue: uberType.xpValue
+        };
+        
+        // Add the elite to the enemies array
+        enemies.push(uber);
     }
     
     // Toggle display of enemy and weapon info when pressing 'i'
@@ -281,8 +378,12 @@ function init() {
     enemies.length = 0;
     projectiles.length = 0;
     xpOrbs.length = 0;
+    healthPotions.length = 0;
+    activeLasers.length = 0;
     
-    // Reset spawn rate
+    // Reset spawn timers
+    lastEnemySpawn = 0;
+    lastPotionSpawn = -potionSpawnInterval; // Start negative so first potion spawns after exactly 1 minute
     enemySpawnRate = 1000;
     
     // Setup control event listeners
@@ -329,7 +430,59 @@ function spawnEnemies(deltaTime) {
     lastEnemySpawn += deltaTime;
     
     // Gradually decrease spawn time (increase difficulty)
-    enemySpawnRate = Math.max(200, 3000 - Math.floor(elapsedGameTime / 5000) * 100);
+    enemySpawnRate = Math.max(150, 3000 - Math.floor(elapsedGameTime / 8000) * 100);
+    
+    // Check if it's time to spawn the Uber enemy (at exactly 8 minutes)
+    if (Math.floor((elapsedGameTime - deltaTime) / 60000) < 8 && Math.floor(elapsedGameTime / 60000) >= 8) {
+        // Spawn the Uber enemy exactly once when crossing the 8-minute mark
+        const enemyType = enemyTypes[6]; // Uber enemy (index 6)
+        const spawnPos = { x: canvas.width / 2, y: -100 }; // Spawn at top center
+        
+        // Create the Uber enemy
+        const uberEnemy = {
+            x: spawnPos.x,
+            y: spawnPos.y,
+            type: enemyType,
+            health: enemyType.health,
+            width: enemyType.size,
+            height: enemyType.size,
+            speed: enemyType.speed,
+            damage: enemyType.damage,
+            lastAttack: 0,
+            attackCooldown: enemyType.attackCooldown,
+            lastBossSpawn: 0,
+            lastExplosion: 0,
+            xpValue: enemyType.xpValue
+        };
+        
+        // Show uber spawn message
+        const uberMessage = document.createElement('div');
+        uberMessage.textContent = '⚠️ FINAL BOSS HAS APPEARED! ⚠️';
+        uberMessage.style.position = 'absolute';
+        uberMessage.style.top = '30%';
+        uberMessage.style.left = '50%';
+        uberMessage.style.transform = 'translate(-50%, -50%)';
+        uberMessage.style.color = '#f0f';
+        uberMessage.style.fontWeight = 'bold';
+        uberMessage.style.fontSize = '32px';
+        uberMessage.style.textShadow = '0 0 10px #000';
+        uberMessage.style.zIndex = '1000';
+        uberMessage.style.padding = '15px 25px';
+        uberMessage.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+        uberMessage.style.borderRadius = '10px';
+        document.body.appendChild(uberMessage);
+        
+        // Remove message after 5 seconds
+        setTimeout(() => {
+            document.body.removeChild(uberMessage);
+        }, 5000);
+        
+        // Add the Uber enemy to the array
+        enemies.push(uberEnemy);
+        
+        // Temporarily stop normal enemy spawning for 15 seconds
+        lastEnemySpawn = -15000;
+    }
     
     if (lastEnemySpawn >= enemySpawnRate) {
         lastEnemySpawn = 0;
@@ -338,9 +491,9 @@ function spawnEnemies(deltaTime) {
         const timeWeight = Math.min(elapsedGameTime / 120000, 1);
         let enemyTypeIndex;
         
-        // First check if we should spawn a boss (1% chance after 5 minutes)
+        // First check if we should spawn an elite (1% chance after 5 minutes)
         if (elapsedGameTime > 300000 && Math.random() < 0.01) {
-            enemyTypeIndex = 5; // Boss (index 5 in enemyTypes array)
+            enemyTypeIndex = 5; // Elite (index 5 in enemyTypes array)
         } else {
             // Normal enemy spawn logic
             // Introduce new enemy types progressively over time
@@ -372,19 +525,38 @@ function spawnEnemies(deltaTime) {
             }
         }
         
+        // Never randomly spawn the Uber enemy
+        if (enemyTypeIndex === 6) {
+            enemyTypeIndex = 5; // Default to regular boss instead
+        }
+        
         const enemyType = enemyTypes[enemyTypeIndex];
         const spawnPos = getRandomSpawnPosition();
         
         // Create enemy with modified health for first two minutes
         let enemyHealth = enemyType.health;
         
-        // If in first two minutes, reduce health for zombies and ghosts
-        if (elapsedGameTime < 120000) {
+        // If in first minute, reduce health for zombies and ghosts
+        if (elapsedGameTime < 60000) {
             if (enemyType.name === 'Zombie') {
                 enemyHealth = 20;
             } else if (enemyType.name === 'Ghost') {
                 enemyHealth = 10;
             }
+        }
+        
+        // Scale enemy health up by 2% every minute, except for Uber enemies
+        if (elapsedGameTime >= 60000 && enemyType.name !== 'Uber') {
+            // Calculate how many full minutes have passed
+            const minutesPassed = Math.floor(elapsedGameTime / 60000);
+            // Increase by 3% per minute: 1.03^minutesPassed
+            const healthMultiplier = Math.pow(1.03, minutesPassed);
+            enemyHealth = Math.round(enemyHealth * healthMultiplier);
+            
+            // Also scale enemy speed up by 3% every minute
+            const speedMultiplier = Math.pow(1.03, minutesPassed);
+            const scaledSpeed = Math.round(enemyType.speed * speedMultiplier);
+            
         }
         
         // Create the enemy
@@ -395,41 +567,14 @@ function spawnEnemies(deltaTime) {
             health: enemyHealth,
             width: enemyType.size,
             height: enemyType.size,
-            speed: enemyType.speed,
+            speed: elapsedGameTime >= 60000 && enemyType.name !== 'Uber' ? 
+                   Math.round(enemyType.speed * Math.pow(1.03, Math.floor(elapsedGameTime / 60000))) : 
+                   enemyType.speed,
             damage: enemyType.damage,
             lastAttack: 0,
             attackCooldown: enemyType.attackCooldown || 1000, // Use type-specific cooldown or default
             xpValue: enemyType.xpValue
         };
-        
-        // Add boss-specific properties
-        if (enemyType.isBoss) {
-            enemy.lastMinionSpawn = 0; // Track when boss last spawned minions
-            
-            // Show boss spawn message
-            if (enemyType.spawnMessage) {
-                const bossMessage = document.createElement('div');
-                bossMessage.textContent = '⚠️ BOSS APPEARED! ⚠️';
-                bossMessage.style.position = 'absolute';
-                bossMessage.style.top = '30%';
-                bossMessage.style.left = '50%';
-                bossMessage.style.transform = 'translate(-50%, -50%)';
-                bossMessage.style.color = '#f00';
-                bossMessage.style.fontWeight = 'bold';
-                bossMessage.style.fontSize = '24px';
-                bossMessage.style.textShadow = '0 0 10px #000';
-                bossMessage.style.zIndex = '1000';
-                bossMessage.style.padding = '10px 20px';
-                bossMessage.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-                bossMessage.style.borderRadius = '5px';
-                document.body.appendChild(bossMessage);
-                
-                // Remove message after 3 seconds
-                setTimeout(() => {
-                    document.body.removeChild(bossMessage);
-                }, 3000);
-            }
-        }
         
         // Add enemy to array
         enemies.push(enemy);
@@ -720,37 +865,150 @@ function updateProjectiles(deltaTime) {
 
 // Update XP orbs and check collection
 function updateXPOrbs(deltaTime) {
-    const magnetRadius = 100; // Distance at which XP orbs get attracted to player
-    
     for (let i = xpOrbs.length - 1; i >= 0; i--) {
         const orb = xpOrbs[i];
         
-        // Calculate distance to player
+        // Move orb toward player if within attraction range
         const dx = player.x - orb.x;
         const dy = player.y - orb.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
         
-        // If close to player, move toward player
-        if (distance < magnetRadius) {
-            const moveSpeed = Math.max(100, 400 * (1 - distance / magnetRadius));
+        // Attraction range of 150 pixels
+        if (distance < 150) {
+            // Calculate speed based on distance (faster as it gets closer)
+            const speed = 200 + (150 - distance) * 3;
             
-            // Normalize direction and move
-            orb.x += (dx / distance) * moveSpeed * (deltaTime / 1000);
-            orb.y += (dy / distance) * moveSpeed * (deltaTime / 1000);
+            // Normalize direction
+            const dirX = dx / distance;
+            const dirY = dy / distance;
+            
+            // Move orb toward player
+            orb.x += dirX * speed * (deltaTime / 1000);
+            orb.y += dirY * speed * (deltaTime / 1000);
         }
         
-        // Check if collected
-        if (distance < player.width / 2 + orb.size / 2) {
+        // Check if orb is collected
+        if (distance < player.width / 2) {
+            // Add XP to player
             player.xp += orb.value;
             
-            // Check level up using the player module
+            // Check for level up
             playerModule.checkLevelUp(player, gameState, GAME_STATE);
-            
-            // Update XP UI
-            updateUI(player);
             
             // Remove orb
             xpOrbs.splice(i, 1);
+        }
+    }
+}
+
+// Spawn health potions every 30 seconds
+function spawnHealthPotions(deltaTime) {
+    lastPotionSpawn += deltaTime;
+    
+    if (lastPotionSpawn >= potionSpawnInterval) {
+        lastPotionSpawn = 0;
+        
+        // Create a potion at a random position within the visible area
+        // Add margin to avoid spawning too close to the edge
+        const margin = 50;
+        const x = margin + Math.random() * (canvas.width - margin * 2);
+        const y = margin + Math.random() * (canvas.height - margin * 2);
+        
+        // Create the potion
+        healthPotions.push({
+            x: x,
+            y: y,
+            size: 20,
+            healAmount: 30,
+            pulsePhase: 0
+        });
+        
+        // Add a sparkle effect to highlight the potion spawn
+        const sparkle = document.createElement('div');
+        sparkle.style.position = 'absolute';
+        sparkle.style.left = `${x}px`;
+        sparkle.style.top = `${y}px`;
+        sparkle.style.width = '50px';
+        sparkle.style.height = '50px';
+        sparkle.style.borderRadius = '50%';
+        sparkle.style.backgroundColor = 'rgba(0, 255, 0, 0.3)';
+        sparkle.style.transform = 'translate(-50%, -50%)';
+        sparkle.style.pointerEvents = 'none';
+        sparkle.style.zIndex = '1';
+        document.body.appendChild(sparkle);
+        
+        // Animate and remove sparkle
+        let size = 30;
+        let opacity = 0.7;
+        const shrinkSparkle = setInterval(() => {
+            size -= 1;
+            opacity -= 0.02;
+            
+            sparkle.style.width = `${size}px`;
+            sparkle.style.height = `${size}px`;
+            sparkle.style.opacity = opacity;
+            
+            if (size <= 0 || opacity <= 0) {
+                clearInterval(shrinkSparkle);
+                document.body.removeChild(sparkle);
+            }
+        }, 20);
+    }
+}
+
+// Update health potions and check for collisions with player
+function updateHealthPotions(deltaTime) {
+    for (let i = healthPotions.length - 1; i >= 0; i--) {
+        const potion = healthPotions[i];
+        
+        // Update pulse animation phase
+        potion.pulsePhase = (potion.pulsePhase + deltaTime / 300) % (Math.PI * 2);
+        
+        // Check if player picked up the potion
+        const dx = player.x - potion.x;
+        const dy = player.y - potion.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance < player.width / 2 + potion.size / 2) {
+            // Heal player
+            const oldHealth = player.health;
+            player.health = Math.min(player.maxHealth, player.health + potion.healAmount);
+            const actualHealAmount = player.health - oldHealth;
+            
+            // Update UI
+            updateUI(player);
+            
+            // Remove potion
+            healthPotions.splice(i, 1);
+            
+            // Show healing effect
+            if (actualHealAmount > 0) {
+                const healText = document.createElement('div');
+                healText.textContent = `+${Math.floor(actualHealAmount)} HP`;
+                healText.style.position = 'absolute';
+                healText.style.left = `${player.x}px`;
+                healText.style.top = `${player.y - 40}px`;
+                healText.style.color = '#0f0';
+                healText.style.fontWeight = 'bold';
+                healText.style.fontSize = '16px';
+                healText.style.textShadow = '0 0 5px #060';
+                healText.style.pointerEvents = 'none';
+                healText.style.zIndex = '1000';
+                document.body.appendChild(healText);
+                
+                // Animate and remove
+                let opacity = 1;
+                const fadeOut = setInterval(() => {
+                    opacity -= 0.05;
+                    healText.style.opacity = opacity;
+                    healText.style.top = `${parseFloat(healText.style.top) - 1}px`;
+                    
+                    if (opacity <= 0) {
+                        clearInterval(fadeOut);
+                        document.body.removeChild(healText);
+                    }
+                }, 30);
+            }
         }
     }
 }
@@ -862,7 +1120,7 @@ function checkProjectileEnemyCollisions() {
                 if (proj.enhancements) {
                     // Life steal (knife)
                     if (proj.enhancements.lifeSteal && proj.weaponRef) {
-                        const healAmount = proj.damage * 0.2;
+                        const healAmount = proj.damage * 0.05;
                         player.health = Math.min(player.maxHealth, player.health + healAmount);
                     }
                     
@@ -915,6 +1173,71 @@ function checkProjectileEnemyCollisions() {
                 
                 // Check if enemy died
                 if (enemy.health <= 0) {
+                    // Check for Uber enemy defeat (victory condition)
+                    if (enemy.type.isUber) {
+                        // Show victory message
+                        const victoryMessage = document.createElement('div');
+                        victoryMessage.textContent = '🎉 VICTORY! YOU DEFEATED THE BOSS! 🎉';
+                        victoryMessage.style.position = 'absolute';
+                        victoryMessage.style.top = '40%';
+                        victoryMessage.style.left = '50%';
+                        victoryMessage.style.transform = 'translate(-50%, -50%)';
+                        victoryMessage.style.color = '#ff0';
+                        victoryMessage.style.fontWeight = 'bold';
+                        victoryMessage.style.fontSize = '36px';
+                        victoryMessage.style.textShadow = '0 0 15px #f0f';
+                        victoryMessage.style.zIndex = '1000';
+                        victoryMessage.style.padding = '20px 30px';
+                        victoryMessage.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+                        victoryMessage.style.borderRadius = '10px';
+                        victoryMessage.style.border = '2px solid #f0f';
+                        document.body.appendChild(victoryMessage);
+                        
+                        // Add stats
+                        const statsMessage = document.createElement('div');
+                        statsMessage.innerHTML = `
+                            <div style="margin-top: 15px; font-size: 24px;">Your Stats:</div>
+                            <div style="margin-top: 10px; font-size: 20px;">Time: ${Math.floor(elapsedGameTime / 60000)}m ${Math.floor((elapsedGameTime % 60000) / 1000)}s</div>
+                            <div style="font-size: 20px;">Kills: ${player.kills}</div>
+                            <div style="font-size: 20px;">Level: ${player.level}</div>
+                            <div style="margin-top: 20px; font-size: 22px; cursor: pointer; text-decoration: underline;" id="restartAfterVictory">Play Again</div>
+                        `;
+                        statsMessage.style.position = 'absolute';
+                        statsMessage.style.top = '60%';
+                        statsMessage.style.left = '50%';
+                        statsMessage.style.transform = 'translate(-50%, -50%)';
+                        statsMessage.style.color = '#fff';
+                        statsMessage.style.fontWeight = 'normal';
+                        statsMessage.style.fontSize = '20px';
+                        statsMessage.style.textAlign = 'center';
+                        statsMessage.style.zIndex = '1000';
+                        statsMessage.style.padding = '20px 30px';
+                        statsMessage.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+                        statsMessage.style.borderRadius = '10px';
+                        statsMessage.style.border = '2px solid #f0f';
+                        document.body.appendChild(statsMessage);
+                        
+                        // Victory visual effects
+                        // 1. Fireworks
+                        for (let i = 0; i < 10; i++) {
+                            setTimeout(() => {
+                                createFirework();
+                            }, i * 300);
+                        }
+                        
+                        // Add click event to restart button
+                        setTimeout(() => {
+                            document.getElementById('restartAfterVictory').addEventListener('click', () => {
+                                document.body.removeChild(victoryMessage);
+                                document.body.removeChild(statsMessage);
+                                init();
+                            });
+                        }, 100);
+                        
+                        // Pause the game (victory state)
+                        gameState.current = GAME_STATE.PAUSED;
+                    }
+                    
                     // Increment kill count
                     player.kills++;
                     
@@ -1009,7 +1332,250 @@ function updateEnemies(deltaTime) {
             }
         }
         
-        // Boss special abilities
+        // Handle laser attack for Elite and Uber enemies
+        if (enemy.type.canFireLaser) {
+            // Initialize or update laser cooldown
+            enemy.lastLaser = (enemy.lastLaser || 0) + deltaTime;
+            
+            // Fire laser when cooldown is complete
+            if (enemy.lastLaser >= enemy.type.laserCooldown) {
+                enemy.lastLaser = 0;
+                
+                // Calculate direction to player
+                const dx = player.x - enemy.x;
+                const dy = player.y - enemy.y;
+                const distanceToPlayer = Math.sqrt(dx * dx + dy * dy);
+                
+                // Only fire laser if player is within range
+                if (distanceToPlayer <= enemy.type.laserRange) {
+                    // Normalize direction
+                    const dirX = dx / distanceToPlayer;
+                    const dirY = dy / distanceToPlayer;
+                    
+                    // Add a charging animation
+                    enemy.isChargingLaser = true;
+                    enemy.laserChargeTime = 0;
+                    enemy.laserChargeDirection = { x: dirX, y: dirY };
+                    
+                    // Create laser properties to be used after charging
+                    const laserProps = {
+                        sourceX: enemy.x,
+                        sourceY: enemy.y,
+                        dirX: dirX,
+                        dirY: dirY,
+                        width: enemy.type.laserWidth,
+                        color: enemy.type.laserColor,
+                        range: enemy.type.laserRange,
+                        damage: enemy.type.laserDamage,
+                        elapsed: 0,
+                        duration: enemy.type.laserDuration,
+                        targetX: enemy.x + dirX * enemy.type.laserRange,
+                        targetY: enemy.y + dirY * enemy.type.laserRange,
+                        enemyRef: enemy
+                    };
+                    
+                    // Actual laser will fire after 500ms delay (increased from 300ms)
+                    setTimeout(() => {
+                        enemy.isChargingLaser = false;
+                        
+                        // Now add the actual laser to be rendered
+                        const laser = {...laserProps};
+                        // Update position in case enemy moved during charging
+                        laser.sourceX = enemy.x;
+                        laser.sourceY = enemy.y;
+                        laser.targetX = enemy.x + dirX * enemy.type.laserRange;
+                        laser.targetY = enemy.y + dirY * enemy.type.laserRange;
+                        
+                        // Add to array to track active lasers
+                        activeLasers.push(laser);
+                        
+                        // We no longer check for hit here, as we'll check continuously in the updateLasers function
+                    }, 500);
+                }
+            }
+        }
+        
+        // Uber enemy special abilities
+        if (enemy.type.isUber) {
+            // 1. Spawn elites ability
+            if (enemy.type.canSpawnBosses) {
+                // Update elite spawn cooldown
+                enemy.lastBossSpawn = (enemy.lastBossSpawn || 0) + deltaTime;
+                
+                // Spawn elites when cooldown is complete
+                if (enemy.lastBossSpawn >= enemy.type.bossSpawnCooldown) {
+                    enemy.lastBossSpawn = 0;
+                    
+                    // Spawn 2 elites
+                    for (let i = 0; i < 2; i++) {
+                        // Calculate spawn position on either side of the Uber
+                        const angle = (i * Math.PI) + (Math.PI / 2); // Left and right sides
+                        const distance = enemy.width * 1.2;
+                        const spawnX = enemy.x + Math.cos(angle) * distance;
+                        const spawnY = enemy.y + Math.sin(angle) * distance;
+                        
+                        // Get elite type
+                        const bossType = enemyTypes[enemy.type.bossType];
+                        
+                        // Add elite
+                        const elite = {
+                            x: spawnX,
+                            y: spawnY,
+                            type: bossType,
+                            health: bossType.health * 0.8, // Slightly weaker
+                            width: bossType.size,
+                            height: bossType.size,
+                            speed: bossType.speed * 1.2, // Slightly faster
+                            damage: bossType.damage,
+                            lastAttack: 0,
+                            attackCooldown: bossType.attackCooldown,
+                            lastMinionSpawn: 0,
+                            xpValue: bossType.xpValue / 2, // Less XP
+                            isSummoned: true // Mark as summoned elite
+                        };
+                        
+                        enemies.push(elite);
+                        
+                        // Add spawn visual effect
+                        const spawnEffect = document.createElement('div');
+                        spawnEffect.style.position = 'absolute';
+                        spawnEffect.style.left = `${spawnX}px`;
+                        spawnEffect.style.top = `${spawnY}px`;
+                        spawnEffect.style.width = `${bossType.size}px`;
+                        spawnEffect.style.height = `${bossType.size}px`;
+                        spawnEffect.style.borderRadius = '50%';
+                        spawnEffect.style.backgroundColor = 'rgba(255, 0, 255, 0.5)';
+                        spawnEffect.style.transform = 'translate(-50%, -50%)';
+                        spawnEffect.style.pointerEvents = 'none';
+                        spawnEffect.style.zIndex = '1';
+                        document.body.appendChild(spawnEffect);
+                        
+                        // Animate and remove spawn effect
+                        let size = 0;
+                        const growEffect = setInterval(() => {
+                            size += 5;
+                            spawnEffect.style.width = `${size}px`;
+                            spawnEffect.style.height = `${size}px`;
+                            spawnEffect.style.opacity = 1 - (size / (bossType.size * 3));
+                            
+                            if (size >= bossType.size * 3) {
+                                clearInterval(growEffect);
+                                document.body.removeChild(spawnEffect);
+                            }
+                        }, 20);
+                    }
+                }
+            }
+            
+            // 2. Explosion ability
+            if (enemy.type.canExplode) {
+                // Update explosion cooldown
+                enemy.lastExplosion = (enemy.lastExplosion || 0) + deltaTime;
+                
+                // Create explosion when cooldown is complete
+                if (enemy.lastExplosion >= enemy.type.explosionCooldown) {
+                    enemy.lastExplosion = 0;
+                    
+                    // Create visual warning effect 1 second before explosion
+                    const warningCircle = document.createElement('div');
+                    warningCircle.style.position = 'absolute';
+                    warningCircle.style.left = `${enemy.x}px`;
+                    warningCircle.style.top = `${enemy.y}px`;
+                    warningCircle.style.width = `${enemy.type.explosionRadius * 2}px`;
+                    warningCircle.style.height = `${enemy.type.explosionRadius * 2}px`;
+                    warningCircle.style.borderRadius = '50%';
+                    warningCircle.style.backgroundColor = 'transparent';
+                    warningCircle.style.border = '3px solid rgba(255, 0, 0, 0.7)';
+                    warningCircle.style.transform = 'translate(-50%, -50%)';
+                    warningCircle.style.pointerEvents = 'none';
+                    warningCircle.style.zIndex = '1';
+                    document.body.appendChild(warningCircle);
+                    
+                    // Animate warning
+                    let pulseCount = 0;
+                    const pulseWarning = setInterval(() => {
+                        pulseCount++;
+                        const opacity = pulseCount % 2 ? 0.2 : 0.7;
+                        warningCircle.style.border = `3px solid rgba(255, 0, 0, ${opacity})`;
+                    }, 200);
+                    
+                    // Create actual explosion after 1 second delay
+                    setTimeout(() => {
+                        clearInterval(pulseWarning);
+                        document.body.removeChild(warningCircle);
+                        
+                        // Create explosion visual effect
+                        const explosion = document.createElement('div');
+                        explosion.style.position = 'absolute';
+                        explosion.style.left = `${enemy.x}px`;
+                        explosion.style.top = `${enemy.y}px`;
+                        explosion.style.width = '0px';
+                        explosion.style.height = '0px';
+                        explosion.style.borderRadius = '50%';
+                        explosion.style.backgroundColor = 'rgba(255, 100, 100, 0.7)';
+                        explosion.style.transform = 'translate(-50%, -50%)';
+                        explosion.style.pointerEvents = 'none';
+                        explosion.style.zIndex = '1';
+                        explosion.style.boxShadow = '0 0 30px rgba(255, 0, 0, 0.7)';
+                        document.body.appendChild(explosion);
+                        
+                        // Check if player is in explosion range and damage them
+                        const dx = player.x - enemy.x;
+                        const dy = player.y - enemy.y;
+                        const distanceToPlayer = Math.sqrt(dx * dx + dy * dy);
+                        
+                        if (distanceToPlayer <= enemy.type.explosionRadius) {
+                            // Calculate damage falloff based on distance
+                            const damageMultiplier = 1 - (distanceToPlayer / enemy.type.explosionRadius);
+                            const damageToApply = enemy.type.explosionDamage * Math.max(0.2, damageMultiplier);
+                            
+                            // Apply damage to player
+                            player.health -= damageToApply;
+                            
+                            // Visual feedback for player damage
+                            canvas.style.filter = 'brightness(1.5) contrast(1.2)';
+                            setTimeout(() => {
+                                canvas.style.filter = 'none';
+                            }, 100);
+                            
+                            // Update UI
+                            updateUI(player);
+                            
+                            // Check if player died
+                            playerModule.handlePlayerDeath(player, gameState, GAME_STATE);
+                        }
+                        
+                        // Animate explosion
+                        let size = 0;
+                        const maxSize = enemy.type.explosionRadius * 2;
+                        const growExplosion = setInterval(() => {
+                            size += 20;
+                            explosion.style.width = `${size}px`;
+                            explosion.style.height = `${size}px`;
+                            
+                            if (size >= maxSize) {
+                                clearInterval(growExplosion);
+                                
+                                // Fade out explosion
+                                let opacity = 0.7;
+                                const fadeExplosion = setInterval(() => {
+                                    opacity -= 0.05;
+                                    explosion.style.backgroundColor = `rgba(255, 100, 100, ${opacity})`;
+                                    explosion.style.boxShadow = `0 0 30px rgba(255, 0, 0, ${opacity})`;
+                                    
+                                    if (opacity <= 0) {
+                                        clearInterval(fadeExplosion);
+                                        document.body.removeChild(explosion);
+                                    }
+                                }, 50);
+                            }
+                        }, 20);
+                    }, 1000);
+                }
+            }
+        }
+        
+        // Elite special abilities
         if (enemy.type.isBoss && enemy.type.canSpawnMinions) {
             // Update minion spawn cooldown
             enemy.lastMinionSpawn = (enemy.lastMinionSpawn || 0) + deltaTime;
@@ -1022,7 +1588,7 @@ function updateEnemies(deltaTime) {
                 const minionCount = 2 + Math.floor(Math.random() * 2);
                 
                 for (let i = 0; i < minionCount; i++) {
-                    // Calculate spawn position around boss
+                    // Calculate spawn position around elite
                     const angle = Math.random() * Math.PI * 2;
                     const distance = enemy.width * 0.8;
                     const spawnX = enemy.x + Math.cos(angle) * distance;
@@ -1142,7 +1708,7 @@ function updateEnemies(deltaTime) {
             
             // Move enemy toward player (regular movement for all enemies)
             if (distance > 0) {
-                // Bosses move more deliberately - slower when closer to player
+                // Elites and Uber move more deliberately - slower when closer to player
                 if (enemy.type.isBoss) {
                     // Adjust speed based on distance to player
                     const speedFactor = Math.min(1, distance / 300); // Full speed at 300+ pixels, slower when closer
@@ -1193,6 +1759,56 @@ function updateEnemyProjectiles(deltaTime) {
             
             // Remove projectile
             enemyProjectiles.splice(i, 1);
+        }
+    }
+}
+
+// Update active lasers
+function updateLasers(deltaTime) {
+    for (let i = activeLasers.length - 1; i >= 0; i--) {
+        const laser = activeLasers[i];
+        
+        // Update elapsed time
+        laser.elapsed += deltaTime;
+        
+        // Check if laser has expired
+        if (laser.elapsed >= laser.duration) {
+            activeLasers.splice(i, 1);
+            continue;
+        }
+        
+        // Update laser source position to follow the enemy
+        if (laser.enemyRef) {
+            laser.sourceX = laser.enemyRef.x;
+            laser.sourceY = laser.enemyRef.y;
+            laser.targetX = laser.sourceX + laser.dirX * laser.range;
+            laser.targetY = laser.sourceY + laser.dirY * laser.range;
+        }
+        
+        // NEW: Check if player is in the path of the laser every frame
+        // Only check if player hasn't been hit by this laser recently (to prevent rapid damage)
+        if (!laser.lastPlayerHit || laser.elapsed - laser.lastPlayerHit > 500) { // 500ms = minimum time between hits
+            const playerIsHit = checkLaserHit(laser, player);
+            
+            if (playerIsHit) {
+                // Apply damage to player
+                player.health -= laser.damage;
+                
+                // Record the time of hit to prevent multiple rapid hits
+                laser.lastPlayerHit = laser.elapsed;
+                
+                // Visual feedback for player damage
+                canvas.style.filter = 'brightness(1.5) contrast(1.2)';
+                setTimeout(() => {
+                    canvas.style.filter = 'none';
+                }, 100);
+                
+                // Update UI
+                updateUI(player);
+                
+                // Check if player died
+                playerModule.handlePlayerDeath(player, gameState, GAME_STATE);
+            }
         }
     }
 }
@@ -1332,10 +1948,13 @@ function gameLoop(timestamp) {
     playerModule.updatePlayerPosition(player, keys, deltaTime, canvas);
     updateEnemies(deltaTime);
     updateEnemyProjectiles(deltaTime);
+    updateLasers(deltaTime);
     playerModule.fireWeapons(player, deltaTime, projectiles, enemies);
     updateProjectiles(deltaTime);
     updateXPOrbs(deltaTime);
+    updateHealthPotions(deltaTime);
     spawnEnemies(deltaTime);
+    spawnHealthPotions(deltaTime);
     
     // Check collisions
     checkProjectileEnemyCollisions();
@@ -1358,15 +1977,95 @@ function drawGame() {
     
     // Draw enemies
     enemies.forEach(enemy => {
-        // Draw enemy (with frozen overlay if frozen)
-        if (enemy.frozen) {
-            ctx.fillStyle = '#adf'; // Ice blue for frozen enemies
-        } else {
-            ctx.fillStyle = enemy.type.color;
-        }
+        // Draw enemy
+        ctx.fillStyle = enemy.type.color;
         ctx.beginPath();
         ctx.arc(enemy.x, enemy.y, enemy.width / 2, 0, Math.PI * 2);
         ctx.fill();
+        
+        // Draw health bar
+        const healthBarWidth = enemy.width * 1.2;
+        const healthBarHeight = 4;
+        const healthPercent = enemy.health / enemy.type.health;
+        
+        ctx.fillStyle = '#333';
+        ctx.fillRect(enemy.x - healthBarWidth / 2, enemy.y - enemy.height / 2 - 10, healthBarWidth, healthBarHeight);
+        
+        ctx.fillStyle = healthPercent > 0.5 ? '#0f0' : healthPercent > 0.25 ? '#ff0' : '#f00';
+        ctx.fillRect(
+            enemy.x - healthBarWidth / 2,
+            enemy.y - enemy.height / 2 - 10,
+            healthBarWidth * healthPercent,
+            healthBarHeight
+        );
+        
+        // Draw laser charging effect if enemy is charging a laser
+        if (enemy.isChargingLaser) {
+            // Draw growing charging circle
+            enemy.laserChargeTime = (enemy.laserChargeTime || 0) + 16; // ~60fps
+            const chargeProgress = Math.min(1, enemy.laserChargeTime / 500); // 500ms charging (increased from 300ms)
+            
+            // Draw thin line showing actual laser path
+            ctx.beginPath();
+            ctx.moveTo(enemy.x, enemy.y);
+            const targetX = enemy.x + enemy.laserChargeDirection.x * enemy.type.laserRange;
+            const targetY = enemy.y + enemy.laserChargeDirection.y * enemy.type.laserRange;
+            ctx.lineTo(targetX, targetY);
+            ctx.lineWidth = 0.5; // Very thin line
+            ctx.strokeStyle = enemy.type.isUber ? 
+                `rgba(255, 0, 255, ${0.2 + chargeProgress * 0.3})` : 
+                `rgba(255, 50, 50, ${0.2 + chargeProgress * 0.3})`;
+            ctx.stroke();
+            
+            // Draw charging indicator ring (dashed)
+            ctx.beginPath();
+            ctx.arc(enemy.x, enemy.y, enemy.width * 0.8, 0, Math.PI * 2);
+            ctx.setLineDash([5, 5]); // Create dashed line
+            ctx.strokeStyle = enemy.type.isUber ? 'rgba(255, 0, 255, 0.3)' : 'rgba(255, 50, 50, 0.3)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.setLineDash([]); // Reset to solid line
+            
+            // Subtle inner glow effect
+            ctx.beginPath();
+            ctx.arc(enemy.x, enemy.y, enemy.width * 0.5 * chargeProgress, 0, Math.PI * 2);
+            ctx.fillStyle = enemy.type.isUber ? 'rgba(255, 0, 255, 0.15)' : 'rgba(255, 50, 50, 0.15)';
+            ctx.fill();
+            
+            // Draw directional indicator (dotted line showing future laser path)
+            const indicatorLength = enemy.width * 1.5 * chargeProgress; // Shorter indicator
+            ctx.beginPath();
+            ctx.moveTo(enemy.x, enemy.y);
+            ctx.lineTo(
+                enemy.x + enemy.laserChargeDirection.x * indicatorLength,
+                enemy.y + enemy.laserChargeDirection.y * indicatorLength
+            );
+            ctx.setLineDash([2, 8]); // More spaced out dots
+            ctx.lineWidth = 1; // Thinner line
+            ctx.strokeStyle = enemy.type.isUber ? 'rgba(255, 0, 255, 0.2)' : 'rgba(255, 50, 50, 0.2)'; // Much more transparent
+            ctx.stroke();
+            ctx.setLineDash([]); // Reset to solid line
+            
+            // Draw charging text with background for better visibility
+            const chargingText = "CHARGING " + Math.floor(chargeProgress * 100) + "%";
+            
+            // Text background for contrast
+            ctx.font = 'bold 12px Arial';
+            const textWidth = ctx.measureText(chargingText).width;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(
+                enemy.x - textWidth/2 - 5,
+                enemy.y - enemy.height * 0.8 - 10,
+                textWidth + 10,
+                20
+            );
+            
+            // Draw the text
+            ctx.font = 'bold 12px Arial';
+            ctx.fillStyle = enemy.type.isUber ? '#f0f' : '#f55';
+            ctx.textAlign = 'center';
+            ctx.fillText(chargingText, enemy.x, enemy.y - enemy.height * 0.8);
+        }
         
         // Add visual indicators for special enemy types
         if (enemy.type.name === 'Archer') {
@@ -1417,7 +2116,7 @@ function drawGame() {
                 enemy.y + Math.sin(angle) * turretLength
             );
             ctx.stroke();
-        } else if (enemy.type.name === 'Boss') {
+        } else if (enemy.type.name === 'Elite') {
             // Draw boss crown
             ctx.fillStyle = '#fd0';
             ctx.beginPath();
@@ -1480,6 +2179,115 @@ function drawGame() {
             ctx.beginPath();
             ctx.arc(enemy.x, enemy.y, enemy.width / 2 + pulseSize, 0, Math.PI * 2);
             ctx.stroke();
+        } else if (enemy.type.name === 'Uber') {
+            // Draw Uber crown (more elaborate than boss crown)
+            ctx.fillStyle = '#f0f'; // Purple crown
+            ctx.beginPath();
+            ctx.moveTo(enemy.x, enemy.y - enemy.height * 0.7); // Crown top center
+            ctx.lineTo(enemy.x + enemy.width * 0.15, enemy.y - enemy.height * 0.6);
+            ctx.lineTo(enemy.x + enemy.width * 0.25, enemy.y - enemy.height * 0.65);
+            ctx.lineTo(enemy.x + enemy.width * 0.35, enemy.y - enemy.height * 0.55);
+            ctx.lineTo(enemy.x + enemy.width * 0.25, enemy.y - enemy.height * 0.45);
+            ctx.lineTo(enemy.x - enemy.width * 0.25, enemy.y - enemy.height * 0.45);
+            ctx.lineTo(enemy.x - enemy.width * 0.35, enemy.y - enemy.height * 0.55);
+            ctx.lineTo(enemy.x - enemy.width * 0.25, enemy.y - enemy.height * 0.65);
+            ctx.lineTo(enemy.x - enemy.width * 0.15, enemy.y - enemy.height * 0.6);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Draw jewel in crown
+            ctx.fillStyle = '#0ff';
+            ctx.beginPath();
+            ctx.arc(enemy.x, enemy.y - enemy.height * 0.58, enemy.width * 0.08, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Draw Uber eyes (more menacing)
+            ctx.fillStyle = '#fff';
+            const eyeSize = enemy.width * 0.18;
+            const eyeDistance = enemy.width * 0.25;
+            
+            // Left eye
+            ctx.beginPath();
+            ctx.arc(enemy.x - eyeDistance, enemy.y - eyeDistance * 0.3, eyeSize, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Right eye
+            ctx.beginPath();
+            ctx.arc(enemy.x + eyeDistance, enemy.y - eyeDistance * 0.3, eyeSize, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Pupils (looking at player with glowing effect)
+            const dx = player.x - enemy.x;
+            const dy = player.y - enemy.y;
+            const angle = Math.atan2(dy, dx);
+            const pupilDistance = eyeSize * 0.4;
+            
+            // Glowing effect
+            ctx.shadowColor = '#f0f';
+            ctx.shadowBlur = 10;
+            
+            // Left pupil
+            ctx.fillStyle = '#f0f';
+            ctx.beginPath();
+            ctx.arc(
+                enemy.x - eyeDistance + Math.cos(angle) * pupilDistance,
+                enemy.y - eyeDistance * 0.3 + Math.sin(angle) * pupilDistance,
+                eyeSize * 0.5, 
+                0, 
+                Math.PI * 2
+            );
+            ctx.fill();
+            
+            // Right pupil
+            ctx.beginPath();
+            ctx.arc(
+                enemy.x + eyeDistance + Math.cos(angle) * pupilDistance,
+                enemy.y - eyeDistance * 0.3 + Math.sin(angle) * pupilDistance,
+                eyeSize * 0.5, 
+                0, 
+                Math.PI * 2
+            );
+            ctx.fill();
+            
+            // Reset shadow
+            ctx.shadowBlur = 0;
+            
+            // Add double pulsing aura for Uber
+            const time1 = Date.now() / 1000;
+            const time2 = Date.now() / 500;
+            const pulseSize1 = Math.sin(time1 * 2) * 8;
+            const pulseSize2 = Math.sin(time2 * 3) * 15;
+            
+            // Inner aura
+            ctx.strokeStyle = '#f0f';
+            ctx.lineWidth = 3 + Math.abs(pulseSize1) / 3;
+            ctx.beginPath();
+            ctx.arc(enemy.x, enemy.y, enemy.width / 2 + pulseSize1, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            // Outer aura
+            ctx.strokeStyle = 'rgba(255, 0, 255, 0.5)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(enemy.x, enemy.y, enemy.width / 2 + pulseSize2 + 20, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            // Add explosion warning indicator if about to explode
+            if (enemy.lastExplosion && enemy.type.explosionCooldown - enemy.lastExplosion < 1500) {
+                // The closer to explosion, the more intense the warning
+                const warningIntensity = 1 - ((enemy.type.explosionCooldown - enemy.lastExplosion) / 1500);
+                
+                ctx.fillStyle = `rgba(255, 50, 50, ${warningIntensity * 0.3})`;
+                ctx.beginPath();
+                ctx.arc(enemy.x, enemy.y, enemy.type.explosionRadius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.strokeStyle = `rgba(255, 0, 0, ${warningIntensity * 0.7})`;
+                ctx.lineWidth = 2 + warningIntensity * 3;
+                ctx.beginPath();
+                ctx.arc(enemy.x, enemy.y, enemy.type.explosionRadius, 0, Math.PI * 2);
+                ctx.stroke();
+            }
         }
         
         // Draw summoned minion indicator if applicable
@@ -1492,24 +2300,6 @@ function drawGame() {
             ctx.stroke();
         }
         
-        // Draw enemy health bar
-        const healthBarWidth = enemy.width;
-        const healthBarHeight = 3;
-        const healthPercent = enemy.health / enemy.type.health;
-        
-        // Background of health bar
-        ctx.fillStyle = '#333';
-        ctx.fillRect(enemy.x - healthBarWidth / 2, enemy.y - enemy.height / 2 - 8, healthBarWidth, healthBarHeight);
-        
-        // Health bar
-        ctx.fillStyle = healthPercent > 0.5 ? '#0f0' : healthPercent > 0.25 ? '#ff0' : '#f00';
-        ctx.fillRect(
-            enemy.x - healthBarWidth / 2,
-            enemy.y - enemy.height / 2 - 8,
-            healthBarWidth * healthPercent,
-            healthBarHeight
-        );
-        
         // Enemy health text
         ctx.fillStyle = '#fff';
         ctx.font = enemy.type.isBoss ? 'bold 14px Arial' : '10px Arial';
@@ -1521,9 +2311,14 @@ function drawGame() {
         );
         
         // Add "BOSS" text for boss enemies
-        if (enemy.type.isBoss) {
-            ctx.fillStyle = '#ff0';
-            ctx.font = 'bold 16px Arial';
+        if (enemy.type.isBoss && !enemy.type.isUber) {
+            // Elite name display removed
+        }
+        
+        // Add "UBER" text for Uber enemy
+        if (enemy.type.isUber) {
+            ctx.fillStyle = '#f0f';
+            ctx.font = 'bold 24px Arial';
             ctx.fillText(
                 'BOSS',
                 enemy.x,
@@ -1670,6 +2465,104 @@ function drawGame() {
         ctx.arc(orb.x, orb.y, orb.size / 2, 0, Math.PI * 2);
         ctx.fill();
     });
+    
+    // Draw health potions
+    healthPotions.forEach(potion => {
+        // Calculate pulse effect (size and opacity fluctuations)
+        const pulseSize = 1 + Math.sin(potion.pulsePhase) * 0.1;
+        const pulseOpacity = 0.6 + Math.sin(potion.pulsePhase) * 0.2;
+        
+        // Draw potion glow
+        ctx.beginPath();
+        ctx.arc(potion.x, potion.y, potion.size * 1.2 * pulseSize, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(0, 255, 0, ${pulseOpacity * 0.3})`;
+        ctx.fill();
+        
+        // Draw potion bottle (red with green liquid)
+        // Bottle outline
+        ctx.beginPath();
+        ctx.arc(potion.x, potion.y, potion.size / 2 * pulseSize, 0, Math.PI * 2);
+        ctx.fillStyle = '#f00';
+        ctx.fill();
+        
+        // Green liquid inside
+        ctx.beginPath();
+        ctx.arc(potion.x, potion.y, potion.size / 3 * pulseSize, 0, Math.PI * 2);
+        ctx.fillStyle = '#0f0';
+        ctx.fill();
+        
+        // Draw small "+" symbol to indicate healing
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        
+        // Horizontal line
+        ctx.beginPath();
+        ctx.moveTo(potion.x - 5, potion.y);
+        ctx.lineTo(potion.x + 5, potion.y);
+        ctx.stroke();
+        
+        // Vertical line
+        ctx.beginPath();
+        ctx.moveTo(potion.x, potion.y - 5);
+        ctx.lineTo(potion.x, potion.y + 5);
+        ctx.stroke();
+    });
+    
+    // Draw active lasers
+    activeLasers.forEach(laser => {
+        // Calculate opacity based on lifetime (fade in and out)
+        let opacity = 1;
+        const fadeTime = laser.duration * 0.2; // 20% of duration for fade in/out
+        if (laser.elapsed < fadeTime) {
+            // Fade in
+            opacity = laser.elapsed / fadeTime;
+        } else if (laser.elapsed > laser.duration - fadeTime) {
+            // Fade out
+            opacity = (laser.duration - laser.elapsed) / fadeTime;
+        }
+        
+        // Draw the laser beam - MUCH more prominent than charging indicator
+        ctx.beginPath();
+        ctx.moveTo(laser.sourceX, laser.sourceY);
+        ctx.lineTo(laser.targetX, laser.targetY);
+        ctx.strokeStyle = `${laser.color}`; // Full opacity
+        ctx.lineWidth = laser.width;
+        ctx.stroke();
+        
+        // Enhanced glow effect to differentiate from charging state
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = laser.color;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(laser.sourceX, laser.sourceY);
+        ctx.lineTo(laser.targetX, laser.targetY);
+        ctx.lineWidth = laser.width * 0.5;
+        ctx.strokeStyle = '#fff'; // White core for more intensity
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        
+        // Draw impact point at target - enlarged
+        ctx.beginPath();
+        ctx.arc(laser.targetX, laser.targetY, laser.width * 1.5, 0, Math.PI * 2);
+        ctx.fillStyle = laser.color;
+        ctx.fill();
+        
+        // Draw source point glow - enhanced
+        ctx.beginPath();
+        ctx.arc(laser.sourceX, laser.sourceY, laser.width * 2, 0, Math.PI * 2);
+        ctx.fillStyle = `${laser.color}${Math.floor(opacity * 180).toString(16).padStart(2, '0')}`;
+        ctx.fill();
+        
+        // Add "danger" text near the laser
+        if (laser.elapsed < 500) { // Only show for the first 500ms
+            ctx.font = 'bold 14px Arial';
+            ctx.fillStyle = '#fff';
+            ctx.textAlign = 'center';
+            const midX = laser.sourceX + (laser.targetX - laser.sourceX) * 0.3;
+            const midY = laser.sourceY + (laser.targetY - laser.sourceY) * 0.3;
+            ctx.fillText("⚠️DANGER⚠️", midX, midY - 15);
+        }
+    });
 }
 
 // Start the game when window loads
@@ -1689,11 +2582,101 @@ window.onload = function() {
         }
     });
     
+    // Custom handler for fullscreen change events
+    function handleFullscreenChange() {
+        resizeCanvas();
+    }
+    
     // Listen for fullscreen change events (for when user exits with Escape key)
-    document.addEventListener('fullscreenchange', resizeCanvas);
-    document.addEventListener('webkitfullscreenchange', resizeCanvas); // Safari
-    document.addEventListener('mozfullscreenchange', resizeCanvas); // Firefox
-    document.addEventListener('MSFullscreenChange', resizeCanvas); // IE11
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange); // Safari
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange); // Firefox
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange); // IE11
     
     init();
 }; 
+
+// Create firework effect for victory celebration
+function createFirework() {
+    if (!canvas) return;
+    
+    // Random position in visible area
+    const x = Math.random() * canvas.width * 0.8 + canvas.width * 0.1;
+    const y = Math.random() * canvas.height * 0.5 + canvas.height * 0.1;
+    
+    // Random color
+    const colors = ['#f0f', '#ff0', '#0ff', '#0f0', '#f00', '#00f'];
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    
+    // Create explosion particles
+    const particleCount = 50 + Math.floor(Math.random() * 50);
+    
+    for (let i = 0; i < particleCount; i++) {
+        const particle = document.createElement('div');
+        particle.style.position = 'absolute';
+        particle.style.left = `${x}px`;
+        particle.style.top = `${y}px`;
+        particle.style.width = '3px';
+        particle.style.height = '3px';
+        particle.style.borderRadius = '50%';
+        particle.style.backgroundColor = color;
+        particle.style.transform = 'translate(-50%, -50%)';
+        particle.style.pointerEvents = 'none';
+        particle.style.zIndex = '1000';
+        document.body.appendChild(particle);
+        
+        // Random direction
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 1 + Math.random() * 5;
+        const dirX = Math.cos(angle) * speed;
+        const dirY = Math.sin(angle) * speed;
+        
+        // Animate particle
+        let life = 0;
+        const maxLife = 30 + Math.random() * 60;
+        const animateParticle = setInterval(() => {
+            life++;
+            
+            // Update position with gravity
+            const left = parseFloat(particle.style.left) + dirX;
+            const top = parseFloat(particle.style.top) + dirY + (life * 0.05); // Add gravity
+            
+            particle.style.left = `${left}px`;
+            particle.style.top = `${top}px`;
+            
+            // Fade out
+            particle.style.opacity = 1 - (life / maxLife);
+            
+            // Remove when expired
+            if (life >= maxLife) {
+                clearInterval(animateParticle);
+                document.body.removeChild(particle);
+            }
+        }, 16);
+    }
+}
+
+// Helper function to check if player is hit by a laser
+function checkLaserHit(laser, player) {
+    // Calculate vector from source to player
+    const sourceToPlayerX = player.x - laser.sourceX;
+    const sourceToPlayerY = player.y - laser.sourceY;
+    
+    // Project that vector onto the laser direction
+    const projectionLength = sourceToPlayerX * laser.dirX + sourceToPlayerY * laser.dirY;
+    
+    // Calculate closest point on the laser line to the player
+    const closestPointX = laser.sourceX + laser.dirX * projectionLength;
+    const closestPointY = laser.sourceY + laser.dirY * projectionLength;
+    
+    // Calculate distance from that point to the player
+    const distanceX = player.x - closestPointX;
+    const distanceY = player.y - closestPointY;
+    const distance = Math.sqrt(distanceX * distanceX + distanceY * distanceY);
+    
+    // Check if that distance is less than player radius + half laser width
+    // and projection point is within the laser range
+    return distance < (player.width / 2 + laser.width / 2) && 
+           projectionLength > 0 && 
+           projectionLength < laser.range;
+}

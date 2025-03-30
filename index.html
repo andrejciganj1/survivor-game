@@ -83,6 +83,29 @@
         #fullscreenButton:hover {
             background-color: rgba(50, 50, 50, 0.5);
         }
+        /* Victory screen styles */
+        .victoryMessage {
+            animation: glow 1.5s infinite alternate;
+            transition: all 0.3s ease;
+        }
+        .victoryMessage:hover {
+            transform: translate(-50%, -50%) scale(1.05);
+        }
+        .statsMessage {
+            animation: fadeIn 1s;
+        }
+        @keyframes glow {
+            from {
+                text-shadow: 0 0 5px #fff, 0 0 10px #fff, 0 0 15px #f0f, 0 0 20px #f0f;
+            }
+            to {
+                text-shadow: 0 0 10px #fff, 0 0 20px #fff, 0 0 30px #f0f, 0 0 40px #f0f;
+            }
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
     </style>
 </head>
 <body>

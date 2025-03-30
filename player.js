@@ -171,7 +171,7 @@ window.WEAPON_TYPES = WEAPON_TYPES;
 const playerDefaults = {
     width: 30,
     height: 30,
-    speed: 200,
+    speed: 150,
     health: 100,
     maxHealth: 100,
     level: 1,
@@ -200,9 +200,11 @@ function createPlayer(canvas) {
 }
 
 // Reset player to starting values
-function resetPlayer(player, canvas) {
-    player.x = canvas.width / 2;
-    player.y = canvas.height / 2;
+function resetPlayer(player, canvas, skipPositionReset = false) {
+    if (!skipPositionReset) {
+        player.x = canvas.width / 2;
+        player.y = canvas.height / 2;
+    }
     player.health = playerDefaults.maxHealth;
     player.maxHealth = playerDefaults.maxHealth;
     player.level = playerDefaults.level;
@@ -583,7 +585,7 @@ function gameOver(player, gameState, GAME_STATE) {
 function levelUp(player, gameState, GAME_STATE) {
     player.level++;
     player.xp -= player.xpToNextLevel;
-    player.xpToNextLevel = Math.floor(player.xpToNextLevel * 1.2);
+    player.xpToNextLevel = Math.floor(player.xpToNextLevel * 1.15);
     
     // Pause the game for upgrades
     gameState.current = GAME_STATE.LEVEL_UP;
@@ -730,10 +732,10 @@ function showLevelUpOptions(player, gameState, GAME_STATE) {
         },
         MOVEMENT_SPEED: {
             name: 'Movement Speed',
-            description: 'Increases your movement speed by 20',
+            description: 'Increases your movement speed by 25',
             upgrade: () => {
-                player.speed += 20;
-                return 'Movement Speed +20';
+                player.speed += 25;
+                return 'Movement Speed +25';
             }
         },
         RECOVERY: {
