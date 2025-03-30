@@ -45,6 +45,7 @@ const WEAPON_TYPES = {
         size: 15,
         jumps: 1,    // Starts with 1 jump (hits 2 enemies total)
         jumpRange: 200, // Max distance to jump to next enemy
+        initialRange: 500, // Maximum range to find first target
         damageDecay: 0.8, // Each jump does 80% of the previous damage
         color: '#4af',
         description: 'Strikes the nearest enemy with lightning that jumps to additional enemies'
@@ -450,12 +451,18 @@ function fireChainLightning(player, weapon, projectiles, enemies) {
     let nearestEnemy = null;
     let nearestDistance = Infinity;
     
+    // Get initialRange with fallback
+    const initialRange = weapon.initialRange !== undefined ? 
+        weapon.initialRange : 
+        (weapon.type.initialRange !== undefined ? weapon.type.initialRange : 500);
+    
     enemies.forEach(enemy => {
         const dx = enemy.x - player.x;
         const dy = enemy.y - player.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
         
-        if (distance < nearestDistance) {
+        // Only consider enemies within the initial range
+        if (distance < nearestDistance && distance <= initialRange) {
             nearestDistance = distance;
             nearestEnemy = enemy;
         }
@@ -488,6 +495,7 @@ function fireChainLightning(player, weapon, projectiles, enemies) {
             damage: weapon.damage,
             jumpsLeft: jumps,
             jumpRange: jumpRange,
+            initialRange: initialRange,
             damageDecay: damageDecay,
             duration: weapon.duration,
             elapsed: 0,
