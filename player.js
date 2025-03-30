@@ -45,7 +45,7 @@ const WEAPON_TYPES = {
         size: 15,
         jumps: 1,    // Starts with 1 jump (hits 2 enemies total)
         jumpRange: 200, // Max distance to jump to next enemy
-        initialRange: 500, // Maximum range to find first target
+        initialRange: 400, // Maximum range to find first target
         damageDecay: 0.8, // Each jump does 80% of the previous damage
         color: '#4af',
         description: 'Strikes the nearest enemy with lightning that jumps to additional enemies'
