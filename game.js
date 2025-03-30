@@ -58,6 +58,7 @@ let gameState = {
 };
 let lastTimestamp = 0;
 let elapsedGameTime = 0;
+let showInfo = true; // Variable to track if info is displayed
 
 // Make GAME_STATE accessible from other modules
 window.GAME_STATE = GAME_STATE;
@@ -94,6 +95,46 @@ const enemyTypes = [
         size: 35, 
         color: '#f55', 
         xpValue: 12 
+    },
+    {
+        name: 'Tank',
+        speed: 30,
+        health: 120,
+        damage: 20,
+        size: 40,
+        color: '#888',
+        xpValue: 20
+    },
+    {
+        name: 'Archer',
+        speed: 70,
+        health: 25,
+        damage: 8,
+        size: 22,
+        color: '#c83',
+        xpValue: 15,
+        ranged: true,
+        shootRange: 400,
+        projectileSpeed: 200,
+        attackCooldown: 3500, // Shoot every 3.5 seconds
+        projectileColor: '#f93',
+        projectileSize: 8
+    },
+    {
+        name: 'Boss',
+        speed: 30,
+        health: 1000,
+        damage: 30,
+        size: 60,
+        color: '#b22',
+        xpValue: 100,
+        attackCooldown: 1500, // Attack slightly faster than normal
+        isBoss: true,
+        spawnMessage: true, // Show message when spawned
+        // Boss can periodically spawn minions
+        canSpawnMinions: true,
+        minionSpawnCooldown: 5000, // Spawn minions every 5 seconds
+        minionType: 0 // Index of zombie in enemyTypes
     }
 ];
 
@@ -118,6 +159,9 @@ const xpOrbs = [];
 // Track game time for enemy spawning
 let lastEnemySpawn = 0;
 let enemySpawnRate = 1000; // milliseconds
+
+// Track enemy projectiles
+const enemyProjectiles = [];
 
 // Setup control event listeners
 function setupControlEventListeners() {
@@ -145,6 +189,23 @@ function handleKeyDown(e) {
         updateUI(player);
     }
     
+    // Toggle display of enemy and weapon info when pressing 'i'
+    if (e.key === 'i' || e.key === 'I') {
+        const enemyInfo = document.getElementById('enemyInfo');
+        const weaponInfo = document.getElementById('weaponInfo');
+        
+        if (enemyInfo.style.display === 'none') {
+            enemyInfo.style.display = 'block';
+            weaponInfo.style.display = 'block';
+        } else {
+            enemyInfo.style.display = 'none';
+            weaponInfo.style.display = 'none';
+        }
+        
+        // Force an update to the UI to reflect changes
+        updateUI(player);
+    }
+    
     // Toggle pause when space is pressed
     if (e.key === ' ' || e.code === 'Space') {
         e.preventDefault(); // Prevent page scrolling
@@ -166,6 +227,16 @@ function handleKeyDown(e) {
             // Remove effects
             canvas.style.filter = 'none';
         }
+    }
+    
+    // F key for fullscreen
+    if (e.key === 'f') {
+        toggleFullscreen();
+    }
+    
+    // Prevent default arrow key scrolling
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+        e.preventDefault();
     }
 }
 
@@ -192,6 +263,13 @@ function init() {
     // Reset game state
     gameState.current = GAME_STATE.RUNNING;
     elapsedGameTime = 0;
+    showInfo = true; // Reset info display to visible
+    
+    // Set initial display state for info sections
+    const enemyInfo = document.getElementById('enemyInfo');
+    const weaponInfo = document.getElementById('weaponInfo');
+    enemyInfo.style.display = 'none';
+    weaponInfo.style.display = 'none';
     
     // Reset player using the player module
     player = playerModule.resetPlayer(player, canvas);
@@ -251,7 +329,7 @@ function spawnEnemies(deltaTime) {
     lastEnemySpawn += deltaTime;
     
     // Gradually decrease spawn time (increase difficulty)
-    enemySpawnRate = Math.max(200, 3000 - Math.floor(elapsedGameTime / 10000) * 100);
+    enemySpawnRate = Math.max(200, 3000 - Math.floor(elapsedGameTime / 5000) * 100);
     
     if (lastEnemySpawn >= enemySpawnRate) {
         lastEnemySpawn = 0;
@@ -260,29 +338,101 @@ function spawnEnemies(deltaTime) {
         const timeWeight = Math.min(elapsedGameTime / 120000, 1);
         let enemyTypeIndex;
         
-        if (Math.random() < timeWeight * 0.7) {
-            enemyTypeIndex = Math.floor(Math.random() * enemyTypes.length);
+        // First check if we should spawn a boss (1% chance after 5 minutes)
+        if (elapsedGameTime > 300000 && Math.random() < 0.01) {
+            enemyTypeIndex = 5; // Boss (index 5 in enemyTypes array)
         } else {
-            enemyTypeIndex = 0; // Default to basic zombie
+            // Normal enemy spawn logic
+            // Introduce new enemy types progressively over time
+            if (elapsedGameTime < 60000) { // First minute only zombies and ghosts
+                enemyTypeIndex = Math.floor(Math.random() * 2);
+            } else if (elapsedGameTime < 120000) { // Second minute add demons
+                enemyTypeIndex = Math.floor(Math.random() * 3);
+            } else if (elapsedGameTime < 180000) { // Third minute add rare archers
+                // 85% basic enemies, 15% chance for archer
+                if (Math.random() < 0.15) {
+                    enemyTypeIndex = 4; // Archer
+                } else {
+                    enemyTypeIndex = Math.floor(Math.random() * 3); // Basic enemies
+                }
+            } else { // After 3 minutes add rare tanks too
+                // Select from all types with controlled probabilities
+                const r = Math.random();
+                if (r < 0.35) {
+                    enemyTypeIndex = 0; // Zombie (35%)
+                } else if (r < 0.65) {
+                    enemyTypeIndex = 1; // Ghost (30%)
+                } else if (r < 0.85) {
+                    enemyTypeIndex = 2; // Demon (20%)
+                } else if (r < 0.95) {
+                    enemyTypeIndex = 4; // Archer (10%)
+                } else {
+                    enemyTypeIndex = 3; // Tank (5%)
+                }
+            }
         }
         
         const enemyType = enemyTypes[enemyTypeIndex];
         const spawnPos = getRandomSpawnPosition();
         
-        // Create enemy
-        enemies.push({
+        // Create enemy with modified health for first two minutes
+        let enemyHealth = enemyType.health;
+        
+        // If in first two minutes, reduce health for zombies and ghosts
+        if (elapsedGameTime < 120000) {
+            if (enemyType.name === 'Zombie') {
+                enemyHealth = 20;
+            } else if (enemyType.name === 'Ghost') {
+                enemyHealth = 10;
+            }
+        }
+        
+        // Create the enemy
+        const enemy = {
             x: spawnPos.x,
             y: spawnPos.y,
             type: enemyType,
-            health: enemyType.health,
+            health: enemyHealth,
             width: enemyType.size,
             height: enemyType.size,
             speed: enemyType.speed,
             damage: enemyType.damage,
             lastAttack: 0,
-            attackCooldown: 1000, // Attack once per second
+            attackCooldown: enemyType.attackCooldown || 1000, // Use type-specific cooldown or default
             xpValue: enemyType.xpValue
-        });
+        };
+        
+        // Add boss-specific properties
+        if (enemyType.isBoss) {
+            enemy.lastMinionSpawn = 0; // Track when boss last spawned minions
+            
+            // Show boss spawn message
+            if (enemyType.spawnMessage) {
+                const bossMessage = document.createElement('div');
+                bossMessage.textContent = '⚠️ BOSS APPEARED! ⚠️';
+                bossMessage.style.position = 'absolute';
+                bossMessage.style.top = '30%';
+                bossMessage.style.left = '50%';
+                bossMessage.style.transform = 'translate(-50%, -50%)';
+                bossMessage.style.color = '#f00';
+                bossMessage.style.fontWeight = 'bold';
+                bossMessage.style.fontSize = '24px';
+                bossMessage.style.textShadow = '0 0 10px #000';
+                bossMessage.style.zIndex = '1000';
+                bossMessage.style.padding = '10px 20px';
+                bossMessage.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+                bossMessage.style.borderRadius = '5px';
+                document.body.appendChild(bossMessage);
+                
+                // Remove message after 3 seconds
+                setTimeout(() => {
+                    document.body.removeChild(bossMessage);
+                }, 3000);
+            }
+        }
+        
+        // Add enemy to array
+        enemies.push(enemy);
     }
 }
 
@@ -367,7 +517,7 @@ function updateProjectiles(deltaTime) {
                 
                 // Create aftershock when the primary explosion is almost done
                 if (proj.enhancements && proj.enhancements.aftershock && 
-                    proj.elapsed > proj.duration * 0.9 && !proj.aftershockSpawned) {
+                    proj.elapsed > proj.duration * 0.6 && !proj.aftershockSpawned) {
                     proj.aftershockSpawned = true;
                     
                     // Schedule the aftershock explosion after a delay
@@ -716,6 +866,35 @@ function checkProjectileEnemyCollisions() {
                         player.health = Math.min(player.maxHealth, player.health + healAmount);
                     }
                     
+                    // Knockback (explosion)
+                    if (proj.enhancements.knockback && proj.type === 'explosion') {
+                        // Calculate direction from explosion center to enemy
+                        const knockbackDx = enemy.x - proj.x;
+                        const knockbackDy = enemy.y - proj.y;
+                        const knockbackDistance = Math.sqrt(knockbackDx * knockbackDx + knockbackDy * knockbackDy);
+                        
+                        if (knockbackDistance > 0) {
+                            // Normalize direction and apply force
+                            const knockbackForce = proj.weaponRef ? proj.weaponRef.knockbackForce : 300;
+                            const knockbackDirX = knockbackDx / knockbackDistance;
+                            const knockbackDirY = knockbackDy / knockbackDistance;
+                            
+                            // Apply knockback with distance falloff (stronger closer to center)
+                            const distanceFactor = 1 - (knockbackDistance / (proj.currentSize / 2));
+                            const appliedForce = knockbackForce * Math.max(0.2, distanceFactor);
+                            
+                            // Push enemy in the calculated direction
+                            enemy.x += knockbackDirX * appliedForce * 0.02; // Immediate position change
+                            enemy.y += knockbackDirY * appliedForce * 0.02;
+                            
+                            // Store knockback velocity on enemy to apply over time
+                            enemy.knockbackVelX = knockbackDirX * appliedForce;
+                            enemy.knockbackVelY = knockbackDirY * appliedForce;
+                            enemy.knockbackDuration = 500; // 500ms of knockback effect
+                            enemy.knockbackTime = 0;
+                        }
+                    }
+                    
                     // Freeze enemies (explosion)
                     if (proj.enhancements.freeze && proj.type === 'explosion') {
                         if (enemy.health > 0) {  // Only freeze if they survive
@@ -731,35 +910,6 @@ function checkProjectileEnemyCollisions() {
                                 }
                             }, 1000);
                         }
-                    }
-                    
-                    // Multiply (knife) - Create two more knives going in different directions
-                    if (proj.enhancements.multiply && proj.type === 'knife' && !projRemoved) {
-                        const angles = [Math.PI/4, -Math.PI/4];
-                        
-                        angles.forEach(offsetAngle => {
-                            const angle = Math.atan2(proj.dirY, proj.dirX) + offsetAngle;
-                            const newDirX = Math.cos(angle);
-                            const newDirY = Math.sin(angle);
-                            
-                            projectiles.push({
-                                x: proj.x,
-                                y: proj.y,
-                                dirX: newDirX,
-                                dirY: newDirY,
-                                speed: proj.speed * 0.8,
-                                size: proj.size * 0.7,
-                                damage: proj.damage * 0.5,
-                                duration: proj.duration * 0.5,
-                                elapsed: 0,
-                                color: proj.color,
-                                type: 'knife',
-                                weaponRef: proj.weaponRef,
-                                enhancements: { isMultiplied: true },
-                                hitEnemies: [...proj.hitEnemies], // Copy the updated hitEnemies list including the current enemy
-                                isMultiplied: true  // Mark as multiplied to prevent infinite multiplication
-                            });
-                        });
                     }
                 }
                 
@@ -840,17 +990,211 @@ function checkPlayerEnemyCollisions(deltaTime) {
 // Update enemies
 function updateEnemies(deltaTime) {
     enemies.forEach(enemy => {
-        // Calculate direction toward player
-        const dx = player.x - enemy.x;
-        const dy = player.y - enemy.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
+        // Apply knockback if active
+        if (enemy.knockbackVelX !== undefined && enemy.knockbackDuration > 0) {
+            // Track knockback time
+            enemy.knockbackTime = (enemy.knockbackTime || 0) + deltaTime;
+            
+            // Calculate remaining knockback strength (linear falloff)
+            const knockbackFactor = 1 - (enemy.knockbackTime / enemy.knockbackDuration);
+            
+            if (knockbackFactor > 0) {
+                // Apply knockback movement
+                enemy.x += enemy.knockbackVelX * knockbackFactor * (deltaTime / 1000);
+                enemy.y += enemy.knockbackVelY * knockbackFactor * (deltaTime / 1000);
+            } else {
+                // Clear knockback when duration is over
+                enemy.knockbackVelX = undefined;
+                enemy.knockbackVelY = undefined;
+            }
+        }
         
-        // Move enemy toward player
-        if (distance > 0) {
-            enemy.x += (dx / distance) * enemy.speed * (deltaTime / 1000);
-            enemy.y += (dy / distance) * enemy.speed * (deltaTime / 1000);
+        // Boss special abilities
+        if (enemy.type.isBoss && enemy.type.canSpawnMinions) {
+            // Update minion spawn cooldown
+            enemy.lastMinionSpawn = (enemy.lastMinionSpawn || 0) + deltaTime;
+            
+            // Spawn minions when cooldown is complete
+            if (enemy.lastMinionSpawn >= enemy.type.minionSpawnCooldown) {
+                enemy.lastMinionSpawn = 0;
+                
+                // Spawn 2-3 minions
+                const minionCount = 2 + Math.floor(Math.random() * 2);
+                
+                for (let i = 0; i < minionCount; i++) {
+                    // Calculate spawn position around boss
+                    const angle = Math.random() * Math.PI * 2;
+                    const distance = enemy.width * 0.8;
+                    const spawnX = enemy.x + Math.cos(angle) * distance;
+                    const spawnY = enemy.y + Math.sin(angle) * distance;
+                    
+                    // Get minion type
+                    const minionType = enemyTypes[enemy.type.minionType];
+                    
+                    // Add minion
+                    enemies.push({
+                        x: spawnX,
+                        y: spawnY,
+                        type: minionType,
+                        health: minionType.health * 0.8, // Slightly weaker
+                        width: minionType.size,
+                        height: minionType.size,
+                        speed: minionType.speed * 1.2, // Slightly faster
+                        damage: minionType.damage,
+                        lastAttack: 0,
+                        attackCooldown: minionType.attackCooldown || 1000,
+                        xpValue: minionType.xpValue / 2, // Less XP
+                        isSummoned: true // Mark as summoned minion
+                    });
+                    
+                    // Add spawn effect
+                    const spawnEffect = document.createElement('div');
+                    spawnEffect.style.position = 'absolute';
+                    spawnEffect.style.left = `${spawnX}px`;
+                    spawnEffect.style.top = `${spawnY}px`;
+                    spawnEffect.style.width = `${minionType.size}px`;
+                    spawnEffect.style.height = `${minionType.size}px`;
+                    spawnEffect.style.borderRadius = '50%';
+                    spawnEffect.style.backgroundColor = 'rgba(255, 0, 0, 0.5)';
+                    spawnEffect.style.transform = 'translate(-50%, -50%)';
+                    spawnEffect.style.pointerEvents = 'none';
+                    spawnEffect.style.zIndex = '1';
+                    document.body.appendChild(spawnEffect);
+                    
+                    // Animate and remove spawn effect
+                    let size = 0;
+                    const growEffect = setInterval(() => {
+                        size += 5;
+                        spawnEffect.style.width = `${size}px`;
+                        spawnEffect.style.height = `${size}px`;
+                        spawnEffect.style.opacity = 1 - (size / (minionType.size * 3));
+                        
+                        if (size >= minionType.size * 3) {
+                            clearInterval(growEffect);
+                            document.body.removeChild(spawnEffect);
+                        }
+                    }, 20);
+                }
+            }
+        }
+        
+        // Only move enemy toward player if not frozen
+        if (!enemy.frozen) {
+            // Calculate direction toward player
+            const dx = player.x - enemy.x;
+            const dy = player.y - enemy.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            // Handle ranged enemies (archers)
+            if (enemy.type.ranged) {
+                // Update attack cooldown
+                enemy.lastAttack = (enemy.lastAttack || 0) + deltaTime;
+                
+                // Check if within shooting range
+                if (distance <= enemy.type.shootRange) {
+                    // Shoot if cooldown is complete
+                    if (enemy.lastAttack >= enemy.type.attackCooldown) {
+                        // Reset cooldown
+                        enemy.lastAttack = 0;
+                        
+                        // Normalize direction to player
+                        const dirX = dx / distance;
+                        const dirY = dy / distance;
+                        
+                        // Create archer projectile
+                        enemyProjectiles.push({
+                            x: enemy.x,
+                            y: enemy.y,
+                            dirX: dirX,
+                            dirY: dirY,
+                            speed: enemy.type.projectileSpeed,
+                            size: enemy.type.projectileSize,
+                            damage: enemy.type.damage,
+                            color: enemy.type.projectileColor || '#f93',
+                            elapsed: 0,
+                            duration: 3000 // 3 seconds maximum flight time
+                        });
+                        
+                        // Archers should try to maintain distance when shooting
+                        // Move away from player if too close (half the shoot range)
+                        if (distance < enemy.type.shootRange * 0.5) {
+                            // Move in opposite direction
+                            enemy.x -= (dx / distance) * enemy.speed * (deltaTime / 1000);
+                            enemy.y -= (dy / distance) * enemy.speed * (deltaTime / 1000);
+                            return; // Skip the regular movement
+                        }
+                        
+                        // Archers move sideways when shooting to avoid getting hit
+                        if (Math.random() < 0.7) { // 70% chance to strafe
+                            // Create perpendicular movement vector
+                            const perpX = -dirY;
+                            const perpY = dirX;
+                            
+                            // Move perpendicular to player direction (strafe)
+                            const strafeDir = Math.random() < 0.5 ? 1 : -1;
+                            enemy.x += perpX * strafeDir * enemy.speed * (deltaTime / 1000);
+                            enemy.y += perpY * strafeDir * enemy.speed * (deltaTime / 1000);
+                            return; // Skip the regular movement
+                        }
+                    }
+                }
+            }
+            
+            // Move enemy toward player (regular movement for all enemies)
+            if (distance > 0) {
+                // Bosses move more deliberately - slower when closer to player
+                if (enemy.type.isBoss) {
+                    // Adjust speed based on distance to player
+                    const speedFactor = Math.min(1, distance / 300); // Full speed at 300+ pixels, slower when closer
+                    enemy.x += (dx / distance) * enemy.speed * speedFactor * (deltaTime / 1000);
+                    enemy.y += (dy / distance) * enemy.speed * speedFactor * (deltaTime / 1000);
+                } else {
+                    // Normal movement for regular enemies
+                    enemy.x += (dx / distance) * enemy.speed * (deltaTime / 1000);
+                    enemy.y += (dy / distance) * enemy.speed * (deltaTime / 1000);
+                }
+            }
         }
     });
+}
+
+// Update enemy projectiles
+function updateEnemyProjectiles(deltaTime) {
+    for (let i = enemyProjectiles.length - 1; i >= 0; i--) {
+        const proj = enemyProjectiles[i];
+        
+        // Update elapsed time
+        proj.elapsed += deltaTime;
+        
+        // Check if projectile has expired
+        if (proj.elapsed >= proj.duration) {
+            enemyProjectiles.splice(i, 1);
+            continue;
+        }
+        
+        // Move projectile
+        proj.x += proj.dirX * proj.speed * (deltaTime / 1000);
+        proj.y += proj.dirY * proj.speed * (deltaTime / 1000);
+        
+        // Check collision with player
+        const dx = proj.x - player.x;
+        const dy = proj.y - player.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance < proj.size / 2 + player.width / 2) {
+            // Apply damage to player
+            player.health -= proj.damage;
+            
+            // Update UI
+            updateUI(player);
+            
+            // Check if player died
+            playerModule.handlePlayerDeath(player, gameState, GAME_STATE);
+            
+            // Remove projectile
+            enemyProjectiles.splice(i, 1);
+        }
+    }
 }
 
 // Update UI elements
@@ -866,70 +1210,78 @@ function updateUI(player) {
     const seconds = Math.floor((elapsedGameTime % 60000) / 1000);
     document.getElementById('time').textContent = `Time: ${minutes}:${seconds.toString().padStart(2, '0')}`;
     
-    // Update enemy information
-    document.getElementById('enemyCount').textContent = `Enemies: ${enemies.length}`;
-    
-    // Calculate average enemy health and speed
-    if (enemies.length > 0) {
-        const totalHealth = enemies.reduce((sum, enemy) => sum + enemy.health, 0);
-        const avgHealth = Math.floor(totalHealth / enemies.length);
-        document.getElementById('enemyHealth').textContent = `Average Health: ${avgHealth}`;
+    // Update enemy information if it's visible
+    if (document.getElementById('enemyInfo').style.display !== 'none') {
+        document.getElementById('enemyCount').textContent = `Enemies: ${enemies.length}`;
         
-        const totalSpeed = enemies.reduce((sum, enemy) => sum + enemy.speed, 0);
-        const avgSpeed = Math.floor(totalSpeed / enemies.length);
-        document.getElementById('enemySpeed').textContent = `Average Speed: ${avgSpeed}`;
-    } else {
-        document.getElementById('enemyHealth').textContent = `Average Health: 0`;
-        document.getElementById('enemySpeed').textContent = `Average Speed: 0`;
+        // Calculate spawn rate in seconds with one decimal place
+        const spawnRateInSeconds = (enemySpawnRate / 1000).toFixed(1);
+        document.getElementById('enemySpawnRate').textContent = `Spawn Rate: ${spawnRateInSeconds}s`;
+        
+        // Calculate average enemy health and speed
+        if (enemies.length > 0) {
+            const totalHealth = enemies.reduce((sum, enemy) => sum + enemy.health, 0);
+            const avgHealth = Math.floor(totalHealth / enemies.length);
+            document.getElementById('enemyHealth').textContent = `Average Health: ${avgHealth}`;
+            
+            const totalSpeed = enemies.reduce((sum, enemy) => sum + enemy.speed, 0);
+            const avgSpeed = Math.floor(totalSpeed / enemies.length);
+            document.getElementById('enemySpeed').textContent = `Average Speed: ${avgSpeed}`;
+        } else {
+            document.getElementById('enemyHealth').textContent = `Average Health: 0`;
+            document.getElementById('enemySpeed').textContent = `Average Speed: 0`;
+        }
     }
     
-    // Update weapon information
-    const weaponInfoDiv = document.getElementById('weaponInfo');
-    // Clear previous weapon info
-    weaponInfoDiv.innerHTML = '';
-    
-    // Create header
-    const header = document.createElement('div');
-    header.style.fontWeight = 'bold';
-    header.textContent = 'Weapon Info:';
-    weaponInfoDiv.appendChild(header);
-    
-    // Add each weapon's info
-    player.weapons.forEach(weapon => {
-        const weaponDiv = document.createElement('div');
-        weaponDiv.style.marginBottom = '2px';
+    // Update weapon information if it's visible
+    if (document.getElementById('weaponInfo').style.display !== 'none') {
+        const weaponInfoDiv = document.getElementById('weaponInfo');
+        // Clear previous weapon info
+        weaponInfoDiv.innerHTML = '';
         
-        // Create base info with color matching weapon
-        weaponDiv.innerHTML = `<span style="color:${weapon.type.color}">${weapon.type.name}</span> (Lvl ${weapon.level}): DMG ${weapon.damage}, CD ${Math.round(weapon.cooldown)}ms`;
+        // Create header
+        const header = document.createElement('div');
+        header.style.fontWeight = 'bold';
+        header.textContent = 'Weapon Info:';
+        weaponInfoDiv.appendChild(header);
         
-        // Add weapon-specific stats
-        if (weapon.type.name === 'Knife') {
-            weaponDiv.innerHTML += `, SPD ${weapon.speed}, Count ${weapon.count}, DUR ${weapon.duration}ms`;
-        } else if (weapon.type.name === 'Orbit') {
-            weaponDiv.innerHTML += `, Orbs ${weapon.count}, Size ${weapon.size}, DUR ${weapon.duration}ms`;
-        } else if (weapon.type.name === 'Explosion') {
-            weaponDiv.innerHTML += `, Size ${weapon.size}, DUR ${weapon.duration}ms`;
-        } else if (weapon.type.name === 'Chain Lightning') {
-            // Add fallback values in case they're undefined
-            const jumps = weapon.jumps !== undefined ? weapon.jumps : weapon.type.jumps;
-            const jumpRange = weapon.jumpRange !== undefined ? weapon.jumpRange : weapon.type.jumpRange;
-            const damageDecay = weapon.damageDecay !== undefined ? weapon.damageDecay : weapon.type.damageDecay;
+        // Add each weapon's info
+        player.weapons.forEach(weapon => {
+            const weaponDiv = document.createElement('div');
+            weaponDiv.style.marginBottom = '2px';
             
-            weaponDiv.innerHTML += `, Jumps ${jumps}, Range ${jumpRange}, SPD ${weapon.speed}`;
-        }
-        
-        // Add enhancement information if any
-        if (weapon.enhancementLevels && weapon.enhancementLevels.length > 0) {
-            const enhancementsDiv = document.createElement('div');
-            enhancementsDiv.style.paddingLeft = '15px';
-            enhancementsDiv.style.fontSize = '0.9em';
-            enhancementsDiv.style.color = '#aaf';
-            enhancementsDiv.textContent = `Enhancements: ${weapon.enhancementLevels.join(', ')}`;
-            weaponDiv.appendChild(enhancementsDiv);
-        }
-        
-        weaponInfoDiv.appendChild(weaponDiv);
-    });
+            // Create base info with color matching weapon
+            weaponDiv.innerHTML = `<span style="color:${weapon.type.color}">${weapon.type.name}</span> (Lvl ${weapon.level}): DMG ${weapon.damage}, CD ${Math.round(weapon.cooldown)}ms`;
+            
+            // Add weapon-specific stats
+            if (weapon.type.name === 'Knife') {
+                weaponDiv.innerHTML += `, SPD ${weapon.speed}, Count ${weapon.count}, DUR ${weapon.duration}ms`;
+            } else if (weapon.type.name === 'Orbit') {
+                weaponDiv.innerHTML += `, Orbs ${weapon.count}, Size ${weapon.size}, DUR ${weapon.duration}ms`;
+            } else if (weapon.type.name === 'Explosion') {
+                weaponDiv.innerHTML += `, Size ${weapon.size}, DUR ${weapon.duration}ms`;
+            } else if (weapon.type.name === 'Chain Lightning') {
+                // Add fallback values in case they're undefined
+                const jumps = weapon.jumps !== undefined ? weapon.jumps : weapon.type.jumps;
+                const jumpRange = weapon.jumpRange !== undefined ? weapon.jumpRange : weapon.type.jumpRange;
+                const damageDecay = weapon.damageDecay !== undefined ? weapon.damageDecay : weapon.type.damageDecay;
+                
+                weaponDiv.innerHTML += `, Jumps ${jumps}, Range ${jumpRange}, SPD ${weapon.speed}`;
+            }
+            
+            // Add enhancement information if any
+            if (weapon.enhancementLevels && weapon.enhancementLevels.length > 0) {
+                const enhancementsDiv = document.createElement('div');
+                enhancementsDiv.style.paddingLeft = '15px';
+                enhancementsDiv.style.fontSize = '0.9em';
+                enhancementsDiv.style.color = '#aaf';
+                enhancementsDiv.textContent = `Enhancements: ${weapon.enhancementLevels.join(', ')}`;
+                weaponDiv.appendChild(enhancementsDiv);
+            }
+            
+            weaponInfoDiv.appendChild(weaponDiv);
+        });
+    }
 }
 
 // Make updateUI accessible from other modules
@@ -979,6 +1331,7 @@ function gameLoop(timestamp) {
     elapsedGameTime += deltaTime;
     playerModule.updatePlayerPosition(player, keys, deltaTime, canvas);
     updateEnemies(deltaTime);
+    updateEnemyProjectiles(deltaTime);
     playerModule.fireWeapons(player, deltaTime, projectiles, enemies);
     updateProjectiles(deltaTime);
     updateXPOrbs(deltaTime);
@@ -1015,6 +1368,130 @@ function drawGame() {
         ctx.arc(enemy.x, enemy.y, enemy.width / 2, 0, Math.PI * 2);
         ctx.fill();
         
+        // Add visual indicators for special enemy types
+        if (enemy.type.name === 'Archer') {
+            // Draw bow indicator
+            ctx.strokeStyle = '#963';
+            ctx.lineWidth = 2;
+            
+            // Calculate direction to player
+            const dx = player.x - enemy.x;
+            const dy = player.y - enemy.y;
+            const angle = Math.atan2(dy, dx);
+            
+            // Draw bow
+            ctx.beginPath();
+            const bowSize = enemy.width * 0.7;
+            ctx.arc(enemy.x, enemy.y, bowSize, angle - 0.5, angle + 0.5);
+            ctx.stroke();
+            
+            // Draw bowstring
+            ctx.beginPath();
+            const bowStringX1 = enemy.x + Math.cos(angle - 0.5) * bowSize;
+            const bowStringY1 = enemy.y + Math.sin(angle - 0.5) * bowSize;
+            const bowStringX2 = enemy.x + Math.cos(angle + 0.5) * bowSize;
+            const bowStringY2 = enemy.y + Math.sin(angle + 0.5) * bowSize;
+            ctx.moveTo(bowStringX1, bowStringY1);
+            ctx.lineTo(bowStringX2, bowStringY2);
+            ctx.stroke();
+        } else if (enemy.type.name === 'Tank') {
+            // Draw tank armor pattern
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(enemy.x, enemy.y, enemy.width * 0.6, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            // Draw tank "turret"
+            const turretLength = enemy.width * 0.6;
+            const dx = player.x - enemy.x;
+            const dy = player.y - enemy.y;
+            const angle = Math.atan2(dy, dx);
+            
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.moveTo(enemy.x, enemy.y);
+            ctx.lineTo(
+                enemy.x + Math.cos(angle) * turretLength,
+                enemy.y + Math.sin(angle) * turretLength
+            );
+            ctx.stroke();
+        } else if (enemy.type.name === 'Boss') {
+            // Draw boss crown
+            ctx.fillStyle = '#fd0';
+            ctx.beginPath();
+            ctx.moveTo(enemy.x, enemy.y - enemy.height * 0.6); // Crown top center
+            ctx.lineTo(enemy.x + enemy.width * 0.2, enemy.y - enemy.height * 0.4); // Right point
+            ctx.lineTo(enemy.x - enemy.width * 0.2, enemy.y - enemy.height * 0.4); // Left point
+            ctx.closePath();
+            ctx.fill();
+            
+            // Draw boss eyes
+            ctx.fillStyle = '#fff';
+            const eyeSize = enemy.width * 0.15;
+            const eyeDistance = enemy.width * 0.2;
+            
+            // Left eye
+            ctx.beginPath();
+            ctx.arc(enemy.x - eyeDistance, enemy.y - eyeDistance * 0.5, eyeSize, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Right eye
+            ctx.beginPath();
+            ctx.arc(enemy.x + eyeDistance, enemy.y - eyeDistance * 0.5, eyeSize, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Pupils (looking at player)
+            ctx.fillStyle = '#000';
+            const dx = player.x - enemy.x;
+            const dy = player.y - enemy.y;
+            const angle = Math.atan2(dy, dx);
+            const pupilDistance = eyeSize * 0.5;
+            
+            // Left pupil
+            ctx.beginPath();
+            ctx.arc(
+                enemy.x - eyeDistance + Math.cos(angle) * pupilDistance,
+                enemy.y - eyeDistance * 0.5 + Math.sin(angle) * pupilDistance,
+                eyeSize * 0.5, 
+                0, 
+                Math.PI * 2
+            );
+            ctx.fill();
+            
+            // Right pupil
+            ctx.beginPath();
+            ctx.arc(
+                enemy.x + eyeDistance + Math.cos(angle) * pupilDistance,
+                enemy.y - eyeDistance * 0.5 + Math.sin(angle) * pupilDistance,
+                eyeSize * 0.5, 
+                0, 
+                Math.PI * 2
+            );
+            ctx.fill();
+            
+            // Add pulsing effect for boss
+            const time = Date.now() / 1000;
+            const pulseSize = Math.sin(time * 3) * 5; // Pulsing effect
+            
+            ctx.strokeStyle = '#f00';
+            ctx.lineWidth = 2 + Math.abs(pulseSize) / 3;
+            ctx.beginPath();
+            ctx.arc(enemy.x, enemy.y, enemy.width / 2 + pulseSize, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+        
+        // Draw summoned minion indicator if applicable
+        if (enemy.isSummoned) {
+            // Draw a small red aura
+            ctx.strokeStyle = 'rgba(255, 0, 0, 0.6)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(enemy.x, enemy.y, enemy.width * 0.6, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+        
         // Draw enemy health bar
         const healthBarWidth = enemy.width;
         const healthBarHeight = 3;
@@ -1035,16 +1512,52 @@ function drawGame() {
         
         // Enemy health text
         ctx.fillStyle = '#fff';
-        ctx.font = '10px Arial';
+        ctx.font = enemy.type.isBoss ? 'bold 14px Arial' : '10px Arial';
         ctx.textAlign = 'center';
         ctx.fillText(
             Math.floor(enemy.health),
             enemy.x,
             enemy.y - enemy.height / 2 - 12
         );
+        
+        // Add "BOSS" text for boss enemies
+        if (enemy.type.isBoss) {
+            ctx.fillStyle = '#ff0';
+            ctx.font = 'bold 16px Arial';
+            ctx.fillText(
+                'BOSS',
+                enemy.x,
+                enemy.y - enemy.height * 0.8
+            );
+        }
     });
     
-    // Draw projectiles
+    // Draw enemy projectiles
+    enemyProjectiles.forEach(proj => {
+        ctx.fillStyle = proj.color;
+        
+        // Draw as a small arrow
+        ctx.save();
+        
+        // Calculate rotation angle
+        const angle = Math.atan2(proj.dirY, proj.dirX);
+        
+        // Translate to position and rotate
+        ctx.translate(proj.x, proj.y);
+        ctx.rotate(angle);
+        
+        // Draw arrow
+        ctx.beginPath();
+        ctx.moveTo(proj.size, 0);
+        ctx.lineTo(-proj.size/2, proj.size/2);
+        ctx.lineTo(-proj.size/2, -proj.size/2);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.restore();
+    });
+    
+    // Draw player projectiles
     projectiles.forEach(proj => {
         ctx.fillStyle = proj.color;
         

@@ -26,7 +26,7 @@ const WEAPON_TYPES = {
     },
     EXPLOSION: {
         name: 'Explosion',
-        damage: 10,
+        damage: 7,
         cooldown: 2000,
         speed: 0,
         count: 1,
@@ -63,12 +63,12 @@ const WEAPON_ENHANCEMENTS = {
                 return `Knife gained Life Steal enhancement`;
             }
         },
-        MULTIPLY: {
-            name: 'Multiply',
-            description: 'Each knife splits into 2 knives on hit',
+        SPREAD: {
+            name: 'Spread',
+            description: 'Fires two additional knives at an angle with each throw',
             apply: (weapon) => {
-                weapon.enhancements.multiply = true;
-                return `Knife gained Multiply enhancement`;
+                weapon.enhancements.spread = true;
+                return `Knife gained Spread enhancement`;
             }
         },
         PIERCE: {
@@ -108,26 +108,28 @@ const WEAPON_ENHANCEMENTS = {
         }
     },
     EXPLOSION: {
-        FREEZE: {
-            name: 'Freeze',
-            description: 'Stops enemies hit by explosion for 1 second',
+        KNOCKBACK: {
+            name: 'Knockback',
+            description: 'Pushes enemies away from the explosion center',
             apply: (weapon) => {
-                weapon.enhancements.freeze = true;
-                return `Explosion gained Freeze enhancement`;
+                weapon.enhancements.knockback = true;
+                weapon.knockbackForce = 600; // Pixels per second force (doubled from 300)
+                return `Explosion gained Knockback enhancement`;
             }
         },
-        EXTEND: {
-            name: 'Extend',
-            description: 'Doubles explosion duration',
+        GRENADE_LAUNCHER: {
+            name: 'Grenade Launcher',
+            description: 'Reduces explosion cooldown and duration by 30%',
             apply: (weapon) => {
-                weapon.enhancements.extend = true;
-                weapon.duration *= 2;
-                return `Explosion gained Extend enhancement`;
+                weapon.enhancements.grenadeLauncher = true;
+                weapon.cooldown *= 0.7;
+                weapon.duration *= 0.7;
+                return `Explosion gained Grenade Launcher enhancement`;
             }
         },
         AFTERSHOCK: {
             name: 'Aftershock',
-            description: 'Creates a second explosion 0.5 seconds later',
+            description: 'Creates a second explosion afterwards',
             apply: (weapon) => {
                 weapon.enhancements.aftershock = true;
                 return `Explosion gained Aftershock enhancement`;
@@ -174,7 +176,7 @@ const playerDefaults = {
     maxHealth: 100,
     level: 1,
     xp: 0,
-    xpToNextLevel: 50,
+    xpToNextLevel: 30,
     kills: 0,
     weapons: []
 };
@@ -314,21 +316,21 @@ function fireKnife(player, weapon, projectiles, enemies) {
         }
     });
     
-    // If no enemies, fire in a random direction
-    let dirX = Math.random() * 2 - 1;
-    let dirY = Math.random() * 2 - 1;
-    
-    if (nearestEnemy) {
-        dirX = nearestEnemy.x - player.x;
-        dirY = nearestEnemy.y - player.y;
-        
-        // Normalize
-        const length = Math.sqrt(dirX * dirX + dirY * dirY);
-        dirX /= length;
-        dirY /= length;
+    // Only shoot if we have a nearby enemy within 500 pixels
+    if (!nearestEnemy || minDistance > 500) {
+        return; // Don't shoot if no enemy is close enough
     }
     
-    // Fire the projectile
+    // Get direction to the nearest enemy
+    let dirX = nearestEnemy.x - player.x;
+    let dirY = nearestEnemy.y - player.y;
+    
+    // Normalize
+    const length = Math.sqrt(dirX * dirX + dirY * dirY);
+    dirX /= length;
+    dirY /= length;
+    
+    // Fire the main projectiles based on weapon count
     for (let i = 0; i < weapon.count; i++) {
         // Add slight spread for multiple knives
         let angle = 0;
@@ -339,6 +341,7 @@ function fireKnife(player, weapon, projectiles, enemies) {
         const rotatedDirX = dirX * Math.cos(angle) - dirY * Math.sin(angle);
         const rotatedDirY = dirX * Math.sin(angle) + dirY * Math.cos(angle);
         
+        // Create main projectile
         projectiles.push({
             x: player.x,
             y: player.y,
@@ -355,6 +358,33 @@ function fireKnife(player, weapon, projectiles, enemies) {
             enhancements: { ...weapon.enhancements },
             hitEnemies: []
         });
+        
+        // If spread enhancement is active, add two side projectiles
+        if (weapon.enhancements.spread) {
+            const spreadAngles = [Math.PI/12, -Math.PI/12]; // 15 degrees each side (reduced from 30)
+            
+            spreadAngles.forEach(spreadAngle => {
+                const spreadDirX = rotatedDirX * Math.cos(spreadAngle) - rotatedDirY * Math.sin(spreadAngle);
+                const spreadDirY = rotatedDirX * Math.sin(spreadAngle) + rotatedDirY * Math.cos(spreadAngle);
+                
+                projectiles.push({
+                    x: player.x,
+                    y: player.y,
+                    dirX: spreadDirX,
+                    dirY: spreadDirY,
+                    speed: weapon.speed * 0.9,  // Slightly slower
+                    size: weapon.size * 0.8,    // Slightly smaller
+                    damage: weapon.damage * 0.7, // 70% of main projectile damage
+                    duration: weapon.duration,
+                    elapsed: 0,
+                    color: weapon.type.color,
+                    type: 'knife',
+                    weaponRef: weapon,
+                    enhancements: { ...weapon.enhancements, isSpread: true }, // Mark as spread projectile
+                    hitEnemies: []
+                });
+            });
+        }
     }
 }
 
@@ -633,7 +663,7 @@ function showLevelUpOptions(player, gameState, GAME_STATE) {
                 upgradeText = `Orbit Level ${weapon.level + 1}: +1 orb, +3 damage`;
                 break;
             case 'Explosion':
-                upgradeText = `Explosion Level ${weapon.level + 1}: +4 damage, +40 size`;
+                upgradeText = `Explosion Level ${weapon.level + 1}: +3 damage, +35 size`;
                 break;
             case 'Chain Lightning':
                 upgradeText = `Chain Lightning Level ${weapon.level + 1}: +3 damage, +1 jump`;
