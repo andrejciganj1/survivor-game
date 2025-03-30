@@ -184,8 +184,8 @@ const enemyTypes = [
         // Explosion ability
         canExplode: true,
         explosionCooldown: 5000, // Explode every 5 seconds
-        explosionRadius: 200,
-        explosionDamage: 40,
+        explosionRadius: 220,
+        explosionDamage: 150,
         // Laser attack (more powerful than Elite)
         canFireLaser: true,
         laserCooldown: 7000, // Fire laser less frequently
@@ -249,14 +249,13 @@ function handleKeyDown(e) {
         keys[e.key] = true;
     }
     
-    // Debug: Give 100 XP when pressing 'e'
+/*
     if (e.key === 'e' && gameState.current === GAME_STATE.RUNNING) {
         player.xp += 100;
         playerModule.checkLevelUp(player, gameState, GAME_STATE);
         updateUI(player);
     }
     
-    // Spawn an elite enemy when pressing 'x'
     if (e.key === 'x' && gameState.current === GAME_STATE.RUNNING) {
         const uberType = enemyTypes[6]; // Uber is index 6
         
@@ -285,7 +284,7 @@ function handleKeyDown(e) {
         // Add the elite to the enemies array
         enemies.push(uber);
     }
-    
+    */
     // Toggle display of enemy and weapon info when pressing 'i'
     if (e.key === 'i' || e.key === 'I') {
         const enemyInfo = document.getElementById('enemyInfo');
