@@ -2308,22 +2308,6 @@ function drawGame() {
             enemy.x,
             enemy.y - enemy.height / 2 - 12
         );
-        
-        // Add "BOSS" text for boss enemies
-        if (enemy.type.isBoss && !enemy.type.isUber) {
-            // Elite name display removed
-        }
-        
-        // Add "UBER" text for Uber enemy
-        if (enemy.type.isUber) {
-            ctx.fillStyle = '#f0f';
-            ctx.font = 'bold 24px Arial';
-            ctx.fillText(
-                'BOSS',
-                enemy.x,
-                enemy.y - enemy.height * 0.8
-            );
-        }
     });
     
     // Draw enemy projectiles
