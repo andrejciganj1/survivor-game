@@ -1143,28 +1143,6 @@ function drawGame() {
                     ctx.arc(proj.x, proj.y, 3, 0, Math.PI * 2);
                     ctx.fill();
                     
-                    // DEBUG: Draw a line connecting all previously hit enemies
-                    if (proj.hitEnemies && proj.hitEnemies.length > 0) {
-                        ctx.beginPath();
-                        ctx.strokeStyle = '#f0f'; // Bright pink for debug
-                        ctx.lineWidth = 1;
-                        ctx.shadowBlur = 0;
-                        
-                        for (let i = 0; i < proj.hitEnemies.length; i++) {
-                            const hitEnemy = proj.hitEnemies[i];
-                            
-                            // Draw a circle around hit enemies
-                            ctx.beginPath();
-                            ctx.arc(hitEnemy.x, hitEnemy.y, hitEnemy.width / 2 + 5, 0, Math.PI * 2);
-                            ctx.stroke();
-                            
-                            // Add text showing hit order
-                            ctx.fillStyle = '#f0f';
-                            ctx.font = '12px Arial';
-                            ctx.fillText(`${i + 1}`, hitEnemy.x, hitEnemy.y - hitEnemy.width / 2 - 10);
-                        }
-                    }
-                    
                     ctx.restore();
                 }
                 break;
