@@ -251,7 +251,7 @@ function spawnEnemies(deltaTime) {
     lastEnemySpawn += deltaTime;
     
     // Gradually decrease spawn time (increase difficulty)
-    enemySpawnRate = Math.max(200, 1000 - Math.floor(elapsedGameTime / 10000) * 100);
+    enemySpawnRate = Math.max(200, 3000 - Math.floor(elapsedGameTime / 10000) * 100);
     
     if (lastEnemySpawn >= enemySpawnRate) {
         lastEnemySpawn = 0;
@@ -383,7 +383,8 @@ function updateProjectiles(deltaTime) {
                                 color: '#f77', // Slightly different color
                                 type: 'explosion',
                                 weaponRef: proj.weaponRef,
-                                enhancements: proj.enhancements && proj.enhancements.freeze ? { freeze: true } : {} // Safely initialize enhancements
+                                enhancements: proj.enhancements && proj.enhancements.freeze ? { freeze: true } : {}, // Safely initialize enhancements
+                                hitEnemies: []
                             });
                         }
                     }, 500);
@@ -618,8 +619,8 @@ function checkProjectileEnemyCollisions() {
                 continue;
             }
             
-            // Skip enemies already hit by this projectile (for any projectile type except explosion)
-            if (proj.type !== 'explosion' && proj.hitEnemies && proj.hitEnemies.includes(enemy)) {
+            // Skip enemies already hit by this projectile (for any projectile type including explosion)
+            if (proj.hitEnemies && proj.hitEnemies.includes(enemy)) {
                 continue;
             }
             

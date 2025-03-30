@@ -4,8 +4,8 @@
 const WEAPON_TYPES = {
     KNIFE: {
         name: 'Knife',
-        damage: 10,
-        cooldown: 500,
+        damage: 5,
+        cooldown: 1000,
         speed: 400,
         count: 1,
         duration: 2000,
