@@ -2,6 +2,48 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
+// Set canvas size to match window size
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    
+    // Reset player position to center when resizing
+    if (typeof player !== 'undefined' && player) {
+        player.x = canvas.width / 2;
+        player.y = canvas.height / 2;
+    }
+}
+
+// Add resize event listener
+window.addEventListener('resize', resizeCanvas);
+
+// Initial canvas sizing without player repositioning
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+// Fullscreen functionality
+function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+        // Enter fullscreen
+        if (document.documentElement.requestFullscreen) {
+            document.documentElement.requestFullscreen();
+        } else if (document.documentElement.webkitRequestFullscreen) { // Safari
+            document.documentElement.webkitRequestFullscreen();
+        } else if (document.documentElement.msRequestFullscreen) { // IE11
+            document.documentElement.msRequestFullscreen();
+        }
+    } else {
+        // Exit fullscreen
+        if (document.exitFullscreen) {
+            document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) { // Safari
+            document.webkitExitFullscreen();
+        } else if (document.msExitFullscreen) { // IE11
+            document.msExitFullscreen();
+        }
+    }
+}
+
 // Game States
 const GAME_STATE = {
     RUNNING: 0,
@@ -11,118 +53,17 @@ const GAME_STATE = {
 };
 
 // Game Variables
-let gameState = GAME_STATE.RUNNING;
+let gameState = {
+    current: GAME_STATE.RUNNING
+};
 let lastTimestamp = 0;
 let elapsedGameTime = 0;
 
-// Player Variables
-const player = {
-    x: canvas.width / 2,
-    y: canvas.height / 2,
-    width: 30,
-    height: 30,
-    speed: 200,
-    health: 100,
-    maxHealth: 100,
-    level: 1,
-    xp: 0,
-    xpToNextLevel: 50,
-    kills: 0,
-    weapons: []
-};
+// Make GAME_STATE accessible from other modules
+window.GAME_STATE = GAME_STATE;
 
-// Weapon Types
-const WEAPON_TYPES = {
-    KNIFE: {
-        name: 'Knife',
-        damage: 10,
-        cooldown: 500,
-        speed: 400,
-        count: 1,
-        duration: 1000,
-        size: 15,
-        color: '#ccc',
-        description: 'Throws a knife in the direction of the nearest enemy',
-        upgrade: function(weapon) {
-            if (weapon.level < 5) {
-                weapon.level++;
-                weapon.damage += 5;
-                weapon.cooldown *= 0.9;
-                return `Knife Level ${weapon.level}: +5 damage, -10% cooldown`;
-            }
-            return null;
-        }
-    },
-    ORBIT: {
-        name: 'Orbit',
-        damage: 5,
-        cooldown: 3000,
-        speed: 0,
-        count: 3,
-        duration: 2000,
-        size: 20,
-        color: '#ff5',
-        description: 'Creates orbs that orbit around you damaging enemies',
-        upgrade: function(weapon) {
-            if (weapon.level < 5) {
-                weapon.level++;
-                weapon.count++;
-                weapon.damage += 3;
-                return `Orbit Level ${weapon.level}: +1 orb, +3 damage`;
-            }
-            return null;
-        }
-    },
-    EXPLOSION: {
-        name: 'Explosion',
-        damage: 20,
-        cooldown: 2000,
-        speed: 0,
-        count: 1,
-        duration: 500,
-        size: 80,
-        color: '#f55',
-        description: 'Creates an explosion around you damaging all nearby enemies',
-        upgrade: function(weapon) {
-            if (weapon.level < 5) {
-                weapon.level++;
-                weapon.damage += 10;
-                weapon.size += 20;
-                return `Explosion Level ${weapon.level}: +10 damage, +20 size`;
-            }
-            return null;
-        }
-    }
-};
-
-// Character Stats
-const CHARACTER_STATS = {
-    MAX_HEALTH: {
-        name: 'Max Health',
-        description: 'Increases your maximum health by 20',
-        upgrade: function() {
-            player.maxHealth += 20;
-            player.health += 20;
-            return 'Max Health +20';
-        }
-    },
-    MOVEMENT_SPEED: {
-        name: 'Movement Speed',
-        description: 'Increases your movement speed by 20',
-        upgrade: function() {
-            player.speed += 20;
-            return 'Movement Speed +20';
-        }
-    },
-    RECOVERY: {
-        name: 'Recovery',
-        description: 'Recovers 30 health',
-        upgrade: function() {
-            player.health = Math.min(player.maxHealth, player.health + 30);
-            return 'Recovered 30 health';
-        }
-    }
-};
+// Create player using the player module
+let player = playerModule.createPlayer(canvas);
 
 // Enemy Variables
 const enemies = [];
@@ -178,24 +119,85 @@ const xpOrbs = [];
 let lastEnemySpawn = 0;
 let enemySpawnRate = 1000; // milliseconds
 
+// Setup control event listeners
+function setupControlEventListeners() {
+    // Clean up any existing event listeners first
+    window.removeEventListener('keydown', handleKeyDown);
+    window.removeEventListener('keyup', handleKeyUp);
+    
+    // Add new event listeners
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    
+    console.log('Control event listeners set up');
+}
+
+// Key down handler
+function handleKeyDown(e) {
+    if (e.key in keys) {
+        keys[e.key] = true;
+    }
+    
+    // Debug: Give 100 XP when pressing 'e'
+    if (e.key === 'e' && gameState.current === GAME_STATE.RUNNING) {
+        player.xp += 100;
+        playerModule.checkLevelUp(player, gameState, GAME_STATE);
+        updateUI(player);
+    }
+    
+    // Toggle pause when space is pressed
+    if (e.key === ' ' || e.code === 'Space') {
+        e.preventDefault(); // Prevent page scrolling
+        
+        console.log('Space pressed, current game state:', gameState.current);
+        
+        if (gameState.current === GAME_STATE.RUNNING) {
+            // Pause the game
+            gameState.current = GAME_STATE.PAUSED;
+            console.log('Game paused, new state:', gameState.current);
+            
+            // Add blur and darken effect
+            canvas.style.filter = 'blur(2px) brightness(0.7)';
+        } else if (gameState.current === GAME_STATE.PAUSED) {
+            // Unpause the game
+            gameState.current = GAME_STATE.RUNNING;
+            console.log('Game unpaused, new state:', gameState.current);
+            
+            // Remove effects
+            canvas.style.filter = 'none';
+        }
+    }
+}
+
+// Key up handler
+function handleKeyUp(e) {
+    if (e.key in keys) {
+        keys[e.key] = false;
+    }
+}
+
+// Setup UI event listeners
+function setupUIEventListeners() {
+    // Restart game when restart button is clicked
+    document.getElementById('restart').addEventListener('click', () => {
+        document.getElementById('gameOver').style.display = 'none';
+        init();
+    });
+    
+    console.log('UI event listeners set up');
+}
+
 // Initialize game
 function init() {
     // Reset game state
-    gameState = GAME_STATE.RUNNING;
+    gameState.current = GAME_STATE.RUNNING;
     elapsedGameTime = 0;
     
-    // Reset player
-    player.x = canvas.width / 2;
-    player.y = canvas.height / 2;
-    player.health = player.maxHealth;
-    player.level = 1;
-    player.xp = 0;
-    player.xpToNextLevel = 50;
-    player.kills = 0;
-    player.weapons = [];
+    // Reset player using the player module
+    player = playerModule.resetPlayer(player, canvas);
     
-    // Add starter weapon (knife)
-    addWeapon(WEAPON_TYPES.KNIFE);
+    // Add starter weapon (chain lightning)
+    playerModule.addWeapon(player, playerModule.WEAPON_TYPES.KNIFE);
     
     // Clear arrays
     enemies.length = 0;
@@ -205,8 +207,11 @@ function init() {
     // Reset spawn rate
     enemySpawnRate = 1000;
     
+    // Setup control event listeners
+    setupControlEventListeners();
+    
     // Update UI
-    updateUI();
+    updateUI(player);
     
     // Start game loop
     requestAnimationFrame(gameLoop);
@@ -281,147 +286,49 @@ function spawnEnemies(deltaTime) {
     }
 }
 
-// Add a weapon to the player
-function addWeapon(weaponType) {
-    player.weapons.push({
-        type: weaponType,
-        lastFired: 0,
-        level: 1,
-        damage: weaponType.damage,
-        cooldown: weaponType.cooldown,
-        speed: weaponType.speed,
-        count: weaponType.count,
-        duration: weaponType.duration,
-        size: weaponType.size
-    });
-}
-
-// Fire weapons based on their cooldown
-function fireWeapons(deltaTime) {
-    player.weapons.forEach(weapon => {
-        weapon.lastFired += deltaTime;
-        
-        if (weapon.lastFired >= weapon.cooldown) {
-            weapon.lastFired = 0;
-            
-            switch(weapon.type.name) {
-                case 'Knife':
-                    fireKnife(weapon);
-                    break;
-                case 'Orbit':
-                    createOrbitals(weapon);
-                    break;
-                case 'Explosion':
-                    createExplosion(weapon);
-                    break;
-            }
-        }
-    });
-}
-
-// Fire a knife projectile toward the nearest enemy
-function fireKnife(weapon) {
-    // Find the nearest enemy
-    let nearestEnemy = null;
-    let minDistance = Number.MAX_VALUE;
-    
-    enemies.forEach(enemy => {
-        const dx = enemy.x - player.x;
-        const dy = enemy.y - player.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        
-        if (distance < minDistance) {
-            minDistance = distance;
-            nearestEnemy = enemy;
-        }
-    });
-    
-    // If no enemies, fire in a random direction
-    let dirX = Math.random() * 2 - 1;
-    let dirY = Math.random() * 2 - 1;
-    
-    if (nearestEnemy) {
-        dirX = nearestEnemy.x - player.x;
-        dirY = nearestEnemy.y - player.y;
-        
-        // Normalize
-        const length = Math.sqrt(dirX * dirX + dirY * dirY);
-        dirX /= length;
-        dirY /= length;
-    }
-    
-    // Fire the projectile
-    for (let i = 0; i < weapon.count; i++) {
-        // Add slight spread for multiple knives
-        let angle = 0;
-        if (weapon.count > 1) {
-            angle = (i / (weapon.count - 1) - 0.5) * Math.PI / 4;
-        }
-        
-        const rotatedDirX = dirX * Math.cos(angle) - dirY * Math.sin(angle);
-        const rotatedDirY = dirX * Math.sin(angle) + dirY * Math.cos(angle);
-        
-        projectiles.push({
-            x: player.x,
-            y: player.y,
-            dirX: rotatedDirX,
-            dirY: rotatedDirY,
-            speed: weapon.speed,
-            size: weapon.size,
-            damage: weapon.damage,
-            duration: weapon.duration,
-            elapsed: 0,
-            color: weapon.type.color,
-            type: 'knife'
-        });
-    }
-}
-
-// Create orbital projectiles that rotate around the player
-function createOrbitals(weapon) {
-    const baseAngle = Date.now() / 1000;
-    
-    for (let i = 0; i < weapon.count; i++) {
-        const angle = baseAngle + (i * (2 * Math.PI / weapon.count));
-        
-        projectiles.push({
-            x: player.x + Math.cos(angle) * 60,
-            y: player.y + Math.sin(angle) * 60,
-            baseAngle: angle,
-            orbitRadius: 60,
-            orbitSpeed: 3,
-            size: weapon.size,
-            damage: weapon.damage,
-            duration: weapon.duration,
-            elapsed: 0,
-            color: weapon.type.color,
-            type: 'orbit'
-        });
-    }
-}
-
-// Create an explosion around the player
-function createExplosion(weapon) {
-    projectiles.push({
-        x: player.x,
-        y: player.y,
-        size: weapon.size,
-        damage: weapon.damage,
-        duration: weapon.duration,
-        elapsed: 0,
-        color: weapon.type.color,
-        type: 'explosion'
-    });
-}
-
 // Update projectiles
 function updateProjectiles(deltaTime) {
     for (let i = projectiles.length - 1; i >= 0; i--) {
         const proj = projectiles[i];
         proj.elapsed += deltaTime;
         
+        // Initialize hitEnemies array if it doesn't exist (for all projectile types)
+        if (!proj.hitEnemies) {
+            proj.hitEnemies = [];
+        }
+        
         // Remove expired projectiles
         if (proj.elapsed >= proj.duration) {
+            // Handle deorbit enhancement for orbit weapons
+            if (proj.type === 'orbit' && proj.enhancements && proj.enhancements.deorbit) {
+                // Calculate the current angle of the orb's position relative to the player
+                const angle = proj.baseAngle + proj.orbitSpeed * (proj.elapsed / 1000);
+                
+                // Calculate direction perpendicular to the orbit radius
+                // For a circular orbit, the tangent direction is perpendicular to the radius
+                // The radius direction is (cos(angle), sin(angle))
+                // So the perpendicular direction is (-sin(angle), cos(angle))
+                const dirX = -Math.sin(angle);
+                const dirY = Math.cos(angle);
+                
+                projectiles.push({
+                    x: proj.x,
+                    y: proj.y,
+                    dirX: dirX,
+                    dirY: dirY,
+                    speed: 300,
+                    size: proj.size,
+                    damage: proj.damage,
+                    duration: 1000,
+                    elapsed: 0,
+                    color: proj.color,
+                    type: 'orbit_projectile', // New type for deorbited orbs
+                    weaponRef: proj.weaponRef,
+                    enhancements: { isDeorbited: true }, // Mark as deorbited
+                    hitEnemies: [] // Initialize empty hit enemies array
+                });
+            }
+            
             projectiles.splice(i, 1);
             continue;
         }
@@ -432,16 +339,229 @@ function updateProjectiles(deltaTime) {
                 proj.x += proj.dirX * proj.speed * (deltaTime / 1000);
                 proj.y += proj.dirY * proj.speed * (deltaTime / 1000);
                 break;
+            case 'orbit_projectile': // Add new case for deorbited orbit projectiles
+                proj.x += proj.dirX * proj.speed * (deltaTime / 1000);
+                proj.y += proj.dirY * proj.speed * (deltaTime / 1000);
+                break;
             case 'orbit':
                 const angle = proj.baseAngle + proj.orbitSpeed * (proj.elapsed / 1000);
                 proj.x = player.x + Math.cos(angle) * proj.orbitRadius;
                 proj.y = player.y + Math.sin(angle) * proj.orbitRadius;
+                break;
+            case 'moon':
+                // First update the parent orb's position
+                if (proj.parentOrb) {
+                    proj.moonAngle += proj.moonOrbitSpeed * (deltaTime / 1000);
+                    proj.x = proj.parentOrb.x + Math.cos(proj.moonAngle) * proj.moonOrbitRadius;
+                    proj.y = proj.parentOrb.y + Math.sin(proj.moonAngle) * proj.moonOrbitRadius;
+                } else {
+                    // If parent is gone, remove this moon
+                    projectiles.splice(i, 1);
+                }
                 break;
             case 'explosion':
                 // Explosion stays in place, just changes size
                 const progress = proj.elapsed / proj.duration;
                 const sizeMultiplier = Math.sin(progress * Math.PI); // Grow then shrink
                 proj.currentSize = proj.size * sizeMultiplier;
+                
+                // Create aftershock when the primary explosion is almost done
+                if (proj.enhancements && proj.enhancements.aftershock && 
+                    proj.elapsed > proj.duration * 0.9 && !proj.aftershockSpawned) {
+                    proj.aftershockSpawned = true;
+                    
+                    // Schedule the aftershock explosion after a delay
+                    setTimeout(() => {
+                        if (gameState.current === GAME_STATE.RUNNING) {
+                            projectiles.push({
+                                x: proj.x,
+                                y: proj.y,
+                                size: proj.size * 0.7,
+                                damage: proj.damage * 0.5,
+                                duration: proj.duration,
+                                elapsed: 0,
+                                color: '#f77', // Slightly different color
+                                type: 'explosion',
+                                weaponRef: proj.weaponRef,
+                                enhancements: proj.enhancements && proj.enhancements.freeze ? { freeze: true } : {} // Safely initialize enhancements
+                            });
+                        }
+                    }, 500);
+                }
+                break;
+            case 'chainLightning':
+                // Move lightning toward the target enemy
+                if (proj.targetEnemy) {
+                    // Calculate direction to target enemy
+                    const dx = proj.targetEnemy.x - proj.x;
+                    const dy = proj.targetEnemy.y - proj.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    // Check if we've hit the target enemy
+                    if (distance < proj.size / 2 + proj.targetEnemy.width / 2) {
+                        // We've hit the target!
+                        
+                        // Apply damage
+                        proj.targetEnemy.health -= proj.damage;
+                        
+                        // Apply ionize enhancement if applicable
+                        if (proj.enhancements && proj.enhancements.ionize) {
+                            proj.targetEnemy.ionized = true;
+                            proj.targetEnemy.ionizedDamageMultiplier = 1.5;
+                            
+                            // Clear ionized state after 3 seconds
+                            setTimeout(() => {
+                                if (enemies.includes(proj.targetEnemy)) {
+                                    proj.targetEnemy.ionized = false;
+                                    proj.targetEnemy.ionizedDamageMultiplier = 1;
+                                }
+                            }, 3000);
+                        }
+                        
+                        // Add enemy to hit list
+                        if (!proj.hitEnemies) {
+                            proj.hitEnemies = [];
+                        }
+                        proj.hitEnemies.push(proj.targetEnemy);
+                        
+                        // Check if enemy died
+                        if (proj.targetEnemy.health <= 0) {
+                            // Increment kill count
+                            player.kills++;
+                            
+                            // Drop XP orb
+                            xpOrbs.push({
+                                x: proj.targetEnemy.x,
+                                y: proj.targetEnemy.y,
+                                value: proj.targetEnemy.xpValue,
+                                size: 10,
+                                color: '#5ff'
+                            });
+                            
+                            // Remove enemy
+                            const index = enemies.indexOf(proj.targetEnemy);
+                            if (index !== -1) {
+                                enemies.splice(index, 1);
+                            }
+                            
+                            // Update UI
+                            updateUI(player);
+                        }
+                        
+                        // Check if we have jumps left
+                        if (proj.jumpsLeft > 0) {
+                            // Find next target within range
+                            let nearestEnemy = null;
+                            let nearestDistance = proj.jumpRange; // Only consider enemies within jump range
+                            
+                            enemies.forEach(enemy => {
+                                // Don't jump to enemies we've already hit
+                                if (!proj.hitEnemies.includes(enemy)) {
+                                    // Calculate distance from current hit enemy to next potential target
+                                    // (not from projectile position)
+                                    const jumpDx = enemy.x - proj.targetEnemy.x;
+                                    const jumpDy = enemy.y - proj.targetEnemy.y;
+                                    const jumpDistance = Math.sqrt(jumpDx * jumpDx + jumpDy * jumpDy);
+                                    
+                                    if (jumpDistance < nearestDistance) {
+                                        nearestDistance = jumpDistance;
+                                        nearestEnemy = enemy;
+                                    }
+                                }
+                            });
+                            
+                            if (nearestEnemy) {
+                                // Create a lightning "jump" projectile
+                                const newProj = {
+                                    // Start position is the current hit enemy, not the projectile position
+                                    x: proj.targetEnemy.x,
+                                    y: proj.targetEnemy.y,
+                                    dirX: 0, // Will be set when tracking the enemy
+                                    dirY: 0,
+                                    targetEnemy: nearestEnemy,
+                                    speed: proj.speed,
+                                    size: proj.size,
+                                    damage: proj.damage * proj.damageDecay, // Reduced damage for jumps
+                                    jumpsLeft: proj.jumpsLeft - 1,
+                                    jumpRange: proj.jumpRange,
+                                    damageDecay: proj.damageDecay,
+                                    duration: proj.duration,
+                                    elapsed: 0,
+                                    color: proj.color,
+                                    type: 'chainLightning',
+                                    weaponRef: proj.weaponRef,
+                                    enhancements: { ...proj.enhancements },
+                                    hitEnemies: [...proj.hitEnemies] // Copy hit enemies list
+                                };
+                                
+                                // If we have fork enhancement, create a second branch if possible
+                                if (proj.enhancements && proj.enhancements.fork) {
+                                    // Find second nearest enemy within range
+                                    let secondEnemy = null;
+                                    let secondDistance = proj.jumpRange;
+                                    
+                                    enemies.forEach(enemy => {
+                                        // Don't jump to enemies we've already hit or the first nearest
+                                        if (!proj.hitEnemies.includes(enemy) && enemy !== nearestEnemy) {
+                                            // Calculate distance from current hit enemy to potential fork target
+                                            const jumpDx = enemy.x - proj.targetEnemy.x;
+                                            const jumpDy = enemy.y - proj.targetEnemy.y;
+                                            const jumpDistance = Math.sqrt(jumpDx * jumpDx + jumpDy * jumpDy);
+                                            
+                                            if (jumpDistance < secondDistance) {
+                                                secondDistance = jumpDistance;
+                                                secondEnemy = enemy;
+                                            }
+                                        }
+                                    });
+                                    
+                                    if (secondEnemy) {
+                                        // Create a second lightning fork projectile
+                                        const forkProj = {
+                                            // Start position is the current hit enemy, not the projectile position
+                                            x: proj.targetEnemy.x,
+                                            y: proj.targetEnemy.y,
+                                            dirX: 0, // Will be set when tracking the enemy
+                                            dirY: 0,
+                                            targetEnemy: secondEnemy,
+                                            speed: proj.speed,
+                                            size: proj.size,
+                                            damage: proj.damage * proj.damageDecay, // Reduced damage for jumps
+                                            jumpsLeft: proj.jumpsLeft - 1,
+                                            jumpRange: proj.jumpRange,
+                                            damageDecay: proj.damageDecay,
+                                            duration: proj.duration,
+                                            elapsed: 0,
+                                            color: proj.color,
+                                            type: 'chainLightning',
+                                            weaponRef: proj.weaponRef,
+                                            enhancements: { ...proj.enhancements },
+                                            hitEnemies: [...proj.hitEnemies] // Copy hit enemies list
+                                        };
+                                        
+                                        projectiles.push(forkProj);
+                                    }
+                                }
+                                
+                                projectiles.push(newProj);
+                            }
+                        }
+                        
+                        // Remove the current lightning projectile
+                        projectiles.splice(i, 1);
+                    } else {
+                        // Move toward target
+                        const moveDist = Math.min(distance, proj.speed * (deltaTime / 1000));
+                        const moveX = (dx / distance) * moveDist;
+                        const moveY = (dy / distance) * moveDist;
+                        
+                        proj.x += moveX;
+                        proj.y += moveY;
+                    }
+                } else {
+                    // Target is gone, remove projectile
+                    projectiles.splice(i, 1);
+                }
                 break;
         }
     }
@@ -472,13 +592,11 @@ function updateXPOrbs(deltaTime) {
         if (distance < player.width / 2 + orb.size / 2) {
             player.xp += orb.value;
             
-            // Check level up
-            if (player.xp >= player.xpToNextLevel) {
-                levelUp();
-            }
+            // Check level up using the player module
+            playerModule.checkLevelUp(player, gameState, GAME_STATE);
             
             // Update XP UI
-            updateUI();
+            updateUI(player);
             
             // Remove orb
             xpOrbs.splice(i, 1);
@@ -490,15 +608,28 @@ function updateXPOrbs(deltaTime) {
 function checkProjectileEnemyCollisions() {
     for (let i = projectiles.length - 1; i >= 0; i--) {
         const proj = projectiles[i];
+        let projRemoved = false;
         
         for (let j = enemies.length - 1; j >= 0; j--) {
             const enemy = enemies[j];
+            
+            // Skip frozen enemies for certain projectiles
+            if (enemy.frozen && (proj.type === 'knife' || proj.type === 'orbit' || proj.type === 'moon')) {
+                continue;
+            }
+            
+            // Skip enemies already hit by this projectile (for any projectile type except explosion)
+            if (proj.type !== 'explosion' && proj.hitEnemies && proj.hitEnemies.includes(enemy)) {
+                continue;
+            }
             
             let hitDetected = false;
             
             switch (proj.type) {
                 case 'knife':
+                case 'orbit_projectile':
                 case 'orbit':
+                case 'moon':
                     // Circle collision detection
                     const dx = proj.x - enemy.x;
                     const dy = proj.y - enemy.y;
@@ -521,8 +652,115 @@ function checkProjectileEnemyCollisions() {
             }
             
             if (hitDetected) {
+                // Add this enemy to the hit enemies list BEFORE enhancement effects
+                if (!proj.hitEnemies) {
+                    proj.hitEnemies = [];
+                }
+                
+                // Don't add the enemy multiple times to the list
+                if (!proj.hitEnemies.includes(enemy)) {
+                    proj.hitEnemies.push(enemy);
+                }
+                
+                // Calculate damage to apply
+                let damageToApply = proj.damage;
+                
+                // Check for Overcharge enhancement for Chain Lightning
+                if (proj.type === 'chainLightning' && proj.enhancements && proj.enhancements.overcharge) {
+                    // 25% chance to do double damage
+                    if (Math.random() < 0.25) {
+                        damageToApply *= 2;
+                        
+                        // Visual indication of a critical hit
+                        const critText = document.createElement('div');
+                        critText.textContent = 'CRIT!';
+                        critText.style.position = 'absolute';
+                        critText.style.left = `${enemy.x}px`;
+                        critText.style.top = `${enemy.y - 30}px`;
+                        critText.style.color = '#ff0';
+                        critText.style.fontWeight = 'bold';
+                        critText.style.fontSize = '16px';
+                        critText.style.textShadow = '0 0 5px #f00';
+                        critText.style.pointerEvents = 'none';
+                        document.body.appendChild(critText);
+                        
+                        // Animate and remove
+                        let opacity = 1;
+                        const fadeout = setInterval(() => {
+                            opacity -= 0.05;
+                            critText.style.opacity = opacity;
+                            critText.style.top = `${parseFloat(critText.style.top) - 1}px`;
+                            
+                            if (opacity <= 0) {
+                                clearInterval(fadeout);
+                                document.body.removeChild(critText);
+                            }
+                        }, 30);
+                    }
+                }
+                
+                // Apply ionized damage multiplier if applicable
+                if (enemy.ionized) {
+                    damageToApply *= enemy.ionizedDamageMultiplier;
+                }
+                
                 // Damage enemy
-                enemy.health -= proj.damage;
+                enemy.health -= damageToApply;
+                
+                // Apply enhancement effects
+                if (proj.enhancements) {
+                    // Life steal (knife)
+                    if (proj.enhancements.lifeSteal && proj.weaponRef) {
+                        const healAmount = proj.damage * 0.2;
+                        player.health = Math.min(player.maxHealth, player.health + healAmount);
+                    }
+                    
+                    // Freeze enemies (explosion)
+                    if (proj.enhancements.freeze && proj.type === 'explosion') {
+                        if (enemy.health > 0) {  // Only freeze if they survive
+                            enemy.frozen = true;
+                            enemy.originalSpeed = enemy.speed;
+                            enemy.speed = 0;
+                            
+                            // Unfreeze after 1 second
+                            setTimeout(() => {
+                                if (enemies.includes(enemy)) {
+                                    enemy.frozen = false;
+                                    enemy.speed = enemy.originalSpeed;
+                                }
+                            }, 1000);
+                        }
+                    }
+                    
+                    // Multiply (knife) - Create two more knives going in different directions
+                    if (proj.enhancements.multiply && proj.type === 'knife' && !projRemoved) {
+                        const angles = [Math.PI/4, -Math.PI/4];
+                        
+                        angles.forEach(offsetAngle => {
+                            const angle = Math.atan2(proj.dirY, proj.dirX) + offsetAngle;
+                            const newDirX = Math.cos(angle);
+                            const newDirY = Math.sin(angle);
+                            
+                            projectiles.push({
+                                x: proj.x,
+                                y: proj.y,
+                                dirX: newDirX,
+                                dirY: newDirY,
+                                speed: proj.speed * 0.8,
+                                size: proj.size * 0.7,
+                                damage: proj.damage * 0.5,
+                                duration: proj.duration * 0.5,
+                                elapsed: 0,
+                                color: proj.color,
+                                type: 'knife',
+                                weaponRef: proj.weaponRef,
+                                enhancements: { isMultiplied: true },
+                                hitEnemies: [...proj.hitEnemies], // Copy the updated hitEnemies list including the current enemy
+                                isMultiplied: true  // Mark as multiplied to prevent infinite multiplication
+                            });
+                        });
+                    }
+                }
                 
                 // Check if enemy died
                 if (enemy.health <= 0) {
@@ -542,14 +780,30 @@ function checkProjectileEnemyCollisions() {
                     enemies.splice(j, 1);
                     
                     // Update UI
-                    document.getElementById('kills').textContent = `Kills: ${player.kills}`;
+                    updateUI(player);
                 }
                 
-                // Remove projectile if it's a knife (others persist)
-                if (proj.type === 'knife') {
-                    projectiles.splice(i, 1);
-                    break; // Break out of enemy loop since projectile is gone
+                // Remove projectile if it's a knife (without pierce) or moon
+                if ((proj.type === 'knife' && proj.enhancements && !proj.enhancements.pierce) || proj.type === 'moon') {
+                    if (!projRemoved) {
+                        projectiles.splice(i, 1);
+                        projRemoved = true;
+                        break; // Break out of enemy loop since projectile is gone
+                    }
                 }
+                // For knives with pierce, track hits and remove after hitting 3 enemies
+                else if (proj.type === 'knife' && proj.enhancements && proj.enhancements.pierce) {
+                    // Don't need to add the enemy again since we already did it at the start
+                    
+                    // Track total hit count
+                    proj.hitCount = (proj.hitCount || 0) + 1;
+                    if (proj.hitCount >= 3) {
+                        projectiles.splice(i, 1);
+                        projRemoved = true;
+                        break;
+                    }
+                }
+                // For orbit, orbit_projectile, and moon projectiles, don't need to track hit enemies again
             }
         }
     }
@@ -573,12 +827,10 @@ function checkPlayerEnemyCollisions(deltaTime) {
                 enemy.lastAttack = 0;
                 
                 // Update health UI
-                updateUI();
+                updateUI(player);
                 
                 // Check if player died
-                if (player.health <= 0) {
-                    gameOver();
-                }
+                playerModule.handlePlayerDeath(player, gameState, GAME_STATE);
             }
         }
     });
@@ -600,168 +852,8 @@ function updateEnemies(deltaTime) {
     });
 }
 
-// Update player position based on input
-function updatePlayer(deltaTime) {
-    // Calculate direction
-    let dirX = 0;
-    let dirY = 0;
-    
-    if (keys.ArrowUp || keys.w) dirY -= 1;
-    if (keys.ArrowDown || keys.s) dirY += 1;
-    if (keys.ArrowLeft || keys.a) dirX -= 1;
-    if (keys.ArrowRight || keys.d) dirX += 1;
-    
-    // Normalize diagonal movement
-    if (dirX !== 0 && dirY !== 0) {
-        const length = Math.sqrt(dirX * dirX + dirY * dirY);
-        dirX /= length;
-        dirY /= length;
-    }
-    
-    // Move player
-    player.x += dirX * player.speed * (deltaTime / 1000);
-    player.y += dirY * player.speed * (deltaTime / 1000);
-    
-    // Keep player within canvas bounds with margin
-    const margin = 20;
-    player.x = Math.max(margin, Math.min(canvas.width - margin, player.x));
-    player.y = Math.max(margin, Math.min(canvas.height - margin, player.y));
-}
-
-// Level up
-function levelUp() {
-    player.level++;
-    player.xp -= player.xpToNextLevel;
-    player.xpToNextLevel = Math.floor(player.xpToNextLevel * 1.2);
-    
-    // Pause the game for upgrades
-    gameState = GAME_STATE.LEVEL_UP;
-    
-    // Show level up UI
-    showLevelUpOptions();
-}
-
-// Show level up options
-function showLevelUpOptions() {
-    const upgradeOptions = document.getElementById('upgradeOptions');
-    upgradeOptions.innerHTML = '';
-    
-    // Get all possible upgrades
-    const possibleUpgrades = [];
-    
-    // Weapon upgrades
-    player.weapons.forEach(weapon => {
-        // Check if weapon can be upgraded (level < 5)
-        if (weapon.level < 5) {
-            // Create upgrade text without applying the upgrade yet
-            let upgradeText = '';
-            
-            switch(weapon.type.name) {
-                case 'Knife':
-                    upgradeText = `Knife Level ${weapon.level + 1}: +5 damage, -10% cooldown`;
-                    break;
-                case 'Orbit':
-                    upgradeText = `Orbit Level ${weapon.level + 1}: +1 orb, +3 damage`;
-                    break;
-                case 'Explosion':
-                    upgradeText = `Explosion Level ${weapon.level + 1}: +10 damage, +20 size`;
-                    break;
-            }
-            
-            possibleUpgrades.push({
-                text: upgradeText,
-                apply: () => {
-                    // Apply the upgrade when selected
-                    weapon.level++;
-                    
-                    switch(weapon.type.name) {
-                        case 'Knife':
-                            weapon.damage += 5;
-                            weapon.cooldown *= 0.9;
-                            break;
-                        case 'Orbit':
-                            weapon.count++;
-                            weapon.damage += 3;
-                            break;
-                        case 'Explosion':
-                            weapon.damage += 10;
-                            weapon.size += 20;
-                            break;
-                    }
-                    
-                    return upgradeText;
-                }
-            });
-        }
-    });
-    
-    // New weapons (if not already have all)
-    const allWeaponTypes = Object.values(WEAPON_TYPES);
-    const availableWeapons = allWeaponTypes.filter(
-        weaponType => !player.weapons.some(w => w.type.name === weaponType.name)
-    );
-    
-    if (availableWeapons.length > 0) {
-        const newWeapon = availableWeapons[Math.floor(Math.random() * availableWeapons.length)];
-        possibleUpgrades.push({
-            text: `New Weapon: ${newWeapon.name} - ${newWeapon.description}`,
-            apply: () => {
-                addWeapon(newWeapon);
-                return `Acquired ${newWeapon.name}`;
-            }
-        });
-    }
-    
-    // Character stats
-    Object.values(CHARACTER_STATS).forEach(stat => {
-        possibleUpgrades.push({
-            text: `${stat.name} - ${stat.description}`,
-            apply: stat.upgrade
-        });
-    });
-    
-    // Choose 3 random upgrades
-    const numOptions = Math.min(3, possibleUpgrades.length);
-    const selectedUpgrades = [];
-    
-    while (selectedUpgrades.length < numOptions && possibleUpgrades.length > 0) {
-        const index = Math.floor(Math.random() * possibleUpgrades.length);
-        selectedUpgrades.push(possibleUpgrades[index]);
-        possibleUpgrades.splice(index, 1);
-    }
-    
-    // Create buttons for each upgrade
-    selectedUpgrades.forEach(upgrade => {
-        const button = document.createElement('div');
-        button.className = 'upgrade';
-        button.textContent = upgrade.text;
-        button.addEventListener('click', () => {
-            // Apply the upgrade
-            const result = upgrade.apply();
-            
-            // Resume the game
-            gameState = GAME_STATE.RUNNING;
-            document.getElementById('levelUp').style.display = 'none';
-            
-            // Update UI
-            updateUI();
-        });
-        upgradeOptions.appendChild(button);
-    });
-    
-    // Show the level up screen
-    document.getElementById('levelUp').style.display = 'block';
-}
-
-// Game over
-function gameOver() {
-    gameState = GAME_STATE.GAME_OVER;
-    document.getElementById('finalScore').textContent = `Kills: ${player.kills}`;
-    document.getElementById('gameOver').style.display = 'block';
-}
-
 // Update UI elements
-function updateUI() {
+function updateUI(player) {
     document.getElementById('level').textContent = `Level: ${player.level}`;
     document.getElementById('xp').textContent = `XP: ${player.xp} / ${player.xpToNextLevel}`;
     document.getElementById('health').textContent = `Health: ${Math.max(0, Math.floor(player.health))}`;
@@ -816,11 +908,31 @@ function updateUI() {
             weaponDiv.innerHTML += `, Orbs ${weapon.count}, Size ${weapon.size}, DUR ${weapon.duration}ms`;
         } else if (weapon.type.name === 'Explosion') {
             weaponDiv.innerHTML += `, Size ${weapon.size}, DUR ${weapon.duration}ms`;
+        } else if (weapon.type.name === 'Chain Lightning') {
+            // Add fallback values in case they're undefined
+            const jumps = weapon.jumps !== undefined ? weapon.jumps : weapon.type.jumps;
+            const jumpRange = weapon.jumpRange !== undefined ? weapon.jumpRange : weapon.type.jumpRange;
+            const damageDecay = weapon.damageDecay !== undefined ? weapon.damageDecay : weapon.type.damageDecay;
+            
+            weaponDiv.innerHTML += `, Jumps ${jumps}, Range ${jumpRange}, SPD ${weapon.speed}`;
+        }
+        
+        // Add enhancement information if any
+        if (weapon.enhancementLevels && weapon.enhancementLevels.length > 0) {
+            const enhancementsDiv = document.createElement('div');
+            enhancementsDiv.style.paddingLeft = '15px';
+            enhancementsDiv.style.fontSize = '0.9em';
+            enhancementsDiv.style.color = '#aaf';
+            enhancementsDiv.textContent = `Enhancements: ${weapon.enhancementLevels.join(', ')}`;
+            weaponDiv.appendChild(enhancementsDiv);
         }
         
         weaponInfoDiv.appendChild(weaponDiv);
     });
 }
+
+// Make updateUI accessible from other modules
+window.updateUI = updateUI;
 
 // Main game loop
 function gameLoop(timestamp) {
@@ -833,23 +945,40 @@ function gameLoop(timestamp) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
     // If game is paused for level up, only render and wait
-    if (gameState === GAME_STATE.LEVEL_UP) {
+    if (gameState.current === GAME_STATE.LEVEL_UP) {
         drawGame();
         requestAnimationFrame(gameLoop);
         return;
     }
     
+    // If game is paused, only draw and display a pause indicator
+    if (gameState.current === GAME_STATE.PAUSED) {
+        drawGame();
+        
+        // Draw pause indicator
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx.font = 'bold 36px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('PAUSED', canvas.width / 2, canvas.height / 2 - 20);
+        
+        ctx.font = '18px Arial';
+        ctx.fillText('Press SPACE to resume', canvas.width / 2, canvas.height / 2 + 20);
+        
+        requestAnimationFrame(gameLoop);
+        return;
+    }
+    
     // If game is over, don't update
-    if (gameState === GAME_STATE.GAME_OVER) {
+    if (gameState.current === GAME_STATE.GAME_OVER) {
         drawGame();
         return;
     }
     
     // Update game
     elapsedGameTime += deltaTime;
-    updatePlayer(deltaTime);
+    playerModule.updatePlayerPosition(player, keys, deltaTime, canvas);
     updateEnemies(deltaTime);
-    fireWeapons(deltaTime);
+    playerModule.fireWeapons(player, deltaTime, projectiles, enemies);
     updateProjectiles(deltaTime);
     updateXPOrbs(deltaTime);
     spawnEnemies(deltaTime);
@@ -859,7 +988,7 @@ function gameLoop(timestamp) {
     checkPlayerEnemyCollisions(deltaTime);
     
     // Update UI each frame for real-time info
-    updateUI();
+    updateUI(player);
     
     // Draw everything
     drawGame();
@@ -871,15 +1000,16 @@ function gameLoop(timestamp) {
 // Draw everything
 function drawGame() {
     // Draw player
-    ctx.fillStyle = '#5af';
-    ctx.beginPath();
-    ctx.arc(player.x, player.y, player.width / 2, 0, Math.PI * 2);
-    ctx.fill();
+    playerModule.drawPlayer(player, ctx);
     
     // Draw enemies
     enemies.forEach(enemy => {
-        // Draw enemy
-        ctx.fillStyle = enemy.type.color;
+        // Draw enemy (with frozen overlay if frozen)
+        if (enemy.frozen) {
+            ctx.fillStyle = '#adf'; // Ice blue for frozen enemies
+        } else {
+            ctx.fillStyle = enemy.type.color;
+        }
         ctx.beginPath();
         ctx.arc(enemy.x, enemy.y, enemy.width / 2, 0, Math.PI * 2);
         ctx.fill();
@@ -934,8 +1064,20 @@ function drawGame() {
                 
                 ctx.restore();
                 break;
+            case 'orbit_projectile': // Add drawing for deorbited orbs
+                // Draw as a circle - same as orbit
+                ctx.beginPath();
+                ctx.arc(proj.x, proj.y, proj.size / 2, 0, Math.PI * 2);
+                ctx.fill();
+                break;
             case 'orbit':
                 // Draw as a circle
+                ctx.beginPath();
+                ctx.arc(proj.x, proj.y, proj.size / 2, 0, Math.PI * 2);
+                ctx.fill();
+                break;
+            case 'moon':
+                // Draw as a smaller circle
                 ctx.beginPath();
                 ctx.arc(proj.x, proj.y, proj.size / 2, 0, Math.PI * 2);
                 ctx.fill();
@@ -948,6 +1090,84 @@ function drawGame() {
                 ctx.fill();
                 ctx.globalAlpha = 1;
                 break;
+            case 'chainLightning':
+                // Draw lightning bolt - zigzag line to target
+                if (proj.targetEnemy) {
+                    ctx.save();
+                    
+                    // Start at current position
+                    ctx.beginPath();
+                    ctx.moveTo(proj.x, proj.y);
+                    
+                    // Calculate direction to target
+                    const dx = proj.targetEnemy.x - proj.x;
+                    const dy = proj.targetEnemy.y - proj.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    // Draw zigzag path with 4 segments
+                    const segments = 4;
+                    for (let i = 1; i <= segments; i++) {
+                        // Calculate point along path
+                        const t = i / segments;
+                        const pointX = proj.x + dx * t;
+                        const pointY = proj.y + dy * t;
+                        
+                        // Add randomness for zigzag effect, reducing as we get closer to the target
+                        const zakFactor = 10 * (1 - t);
+                        const offsetX = (Math.random() * 2 - 1) * zakFactor;
+                        const offsetY = (Math.random() * 2 - 1) * zakFactor;
+                        
+                        // Don't offset the final point
+                        if (i === segments) {
+                            ctx.lineTo(pointX, pointY);
+                        } else {
+                            ctx.lineTo(pointX + offsetX, pointY + offsetY);
+                        }
+                    }
+                    
+                    // Set line style
+                    ctx.strokeStyle = proj.color;
+                    ctx.lineWidth = 3;
+                    ctx.lineCap = 'round';
+                    ctx.lineJoin = 'round';
+                    
+                    // Draw glow effect
+                    ctx.shadowColor = proj.color;
+                    ctx.shadowBlur = 15;
+                    
+                    // Draw the lightning
+                    ctx.stroke();
+                    
+                    // Draw a small circle at starting point
+                    ctx.beginPath();
+                    ctx.arc(proj.x, proj.y, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // DEBUG: Draw a line connecting all previously hit enemies
+                    if (proj.hitEnemies && proj.hitEnemies.length > 0) {
+                        ctx.beginPath();
+                        ctx.strokeStyle = '#f0f'; // Bright pink for debug
+                        ctx.lineWidth = 1;
+                        ctx.shadowBlur = 0;
+                        
+                        for (let i = 0; i < proj.hitEnemies.length; i++) {
+                            const hitEnemy = proj.hitEnemies[i];
+                            
+                            // Draw a circle around hit enemies
+                            ctx.beginPath();
+                            ctx.arc(hitEnemy.x, hitEnemy.y, hitEnemy.width / 2 + 5, 0, Math.PI * 2);
+                            ctx.stroke();
+                            
+                            // Add text showing hit order
+                            ctx.fillStyle = '#f0f';
+                            ctx.font = '12px Arial';
+                            ctx.fillText(`${i + 1}`, hitEnemy.x, hitEnemy.y - hitEnemy.width / 2 - 10);
+                        }
+                    }
+                    
+                    ctx.restore();
+                }
+                break;
         }
     });
     
@@ -958,42 +1178,30 @@ function drawGame() {
         ctx.arc(orb.x, orb.y, orb.size / 2, 0, Math.PI * 2);
         ctx.fill();
     });
-    
-    // Draw health bar
-    const healthBarWidth = 40;
-    const healthBarHeight = 4;
-    const healthPercent = player.health / player.maxHealth;
-    
-    ctx.fillStyle = '#333';
-    ctx.fillRect(player.x - healthBarWidth / 2, player.y - 25, healthBarWidth, healthBarHeight);
-    
-    ctx.fillStyle = healthPercent > 0.5 ? '#0f0' : healthPercent > 0.25 ? '#ff0' : '#f00';
-    ctx.fillRect(
-        player.x - healthBarWidth / 2,
-        player.y - 25,
-        healthBarWidth * healthPercent,
-        healthBarHeight
-    );
 }
 
-// Event Listeners
-window.addEventListener('keydown', (e) => {
-    if (e.key in keys) {
-        keys[e.key] = true;
-    }
-});
-
-window.addEventListener('keyup', (e) => {
-    if (e.key in keys) {
-        keys[e.key] = false;
-    }
-});
-
-// Restart game when restart button is clicked
-document.getElementById('restart').addEventListener('click', () => {
-    document.getElementById('gameOver').style.display = 'none';
-    init();
-});
-
 // Start the game when window loads
-window.onload = init; 
+window.onload = function() {
+    resizeCanvas(); // Ensure canvas is properly sized
+    
+    // Setup UI event listeners
+    setupUIEventListeners();
+    
+    // Setup fullscreen button
+    document.getElementById('fullscreenButton').addEventListener('click', toggleFullscreen);
+    
+    // Setup F key for fullscreen toggle
+    window.addEventListener('keydown', function(e) {
+        if (e.key === 'f' || e.key === 'F') {
+            toggleFullscreen();
+        }
+    });
+    
+    // Listen for fullscreen change events (for when user exits with Escape key)
+    document.addEventListener('fullscreenchange', resizeCanvas);
+    document.addEventListener('webkitfullscreenchange', resizeCanvas); // Safari
+    document.addEventListener('mozfullscreenchange', resizeCanvas); // Firefox
+    document.addEventListener('MSFullscreenChange', resizeCanvas); // IE11
+    
+    init();
+}; 
