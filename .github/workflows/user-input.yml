@@ -1,0 +1,25 @@
+name: User Input Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      user_message:
+        description: 'Enter your message'
+        required: true
+        type: string
+        default: 'Hello World'
+
+jobs:
+  write-input:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Write user input to file
+        run: |
+          echo "${{ github.event.inputs.user_message }}" > user_input.txt
+          
+      - name: Display the input
+        run: |
+          echo "User input was:"
+          cat user_input.txt 
