@@ -11,6 +11,9 @@ on:
 jobs:
   process-version:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
     steps:
       - name: Store version in repository variable
         env:
