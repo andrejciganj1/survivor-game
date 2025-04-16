@@ -11,25 +11,12 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
-      - name: List Artifacts via GitHub API
-        id: list-artifacts
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Echo version from repository variable
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ARTIFACTS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-               -H "Accept: application/vnd.github.v3+json" \
-               https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/artifacts)
-          echo "Artifacts: $ARTIFACTS"
-      - name: Debug Workflow Run Context
-        run: |
-          echo "Triggered by workflow run ID: ${{ github.event.workflow_run.id }}"
-      - name: Download Version Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: version-artifact
-          run-id: ${{ github.event.workflow_run.id }}
-
-      - name: List Downloaded Files
-        run: ls -l
-      - name: Read and Echo Version
-        run: |
-          VERSION=$(cat version.txt)
-          echo "Echoing version: $VERSION"
+          VERSION=$(gh variable get WORKFLOW_VERSION --repo ${{ github.repository }})
+          echo "Version from previous workflow: $VERSION"
+        shell: bash
