@@ -23,6 +23,9 @@ jobs:
           echo "Triggered by workflow run ID: ${{ github.event.workflow_run.id }}"
       - name: Download Version Artifact
         uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+
       - name: List Downloaded Files
         run: ls -l
       - name: Read and Echo Version
