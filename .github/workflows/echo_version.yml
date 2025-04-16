@@ -15,7 +15,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: version-artifact
-          run-id: ${{ github.event.workflow_run.id }}
       - name: Read and Echo Version
         run: |
           VERSION=$(cat version.txt)
