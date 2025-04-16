@@ -13,4 +13,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Echo Version
-        run: echo "Echoing version: ${{ github.event.inputs.version }}"
+        run: |
+          echo "Echoing version: ${{ github.event.inputs.version }}"
