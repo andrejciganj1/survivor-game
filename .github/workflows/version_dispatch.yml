@@ -12,14 +12,11 @@ jobs:
   process-version:
     runs-on: ubuntu-latest
     steps:
-      - name: Echo Version
+      - name: Store version in repository variable
+        env:
+          MY_VERSION: ${{ github.event.inputs.version }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Received version: ${{ github.event.inputs.version }}"
-      - name: Save Version as Artifact
-        run: |
-          echo "${{ github.event.inputs.version }}" > version.txt
-      - name: Upload Version Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: version-artifact
-          path: version.txt
+          echo "VERSION=$MY_VERSION" >> $GITHUB_ENV
+          gh variable set WORKFLOW_VERSION "$MY_VERSION" --repo ${{ github.repository }}
+        shell: bash
