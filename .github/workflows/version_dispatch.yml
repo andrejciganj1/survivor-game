@@ -13,7 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Echo Version
-        run: echo "Received version: ${{ github.event.inputs.version }}"
+        run: |
+          echo "Received version: ${{ github.event.inputs.version }}"
       - name: Trigger Next Workflow
         run: |
           curl -X POST \
