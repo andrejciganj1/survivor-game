@@ -1,17 +1,22 @@
 name: Echo Version Workflow
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version number to echo'
-        required: true
-        type: string
+  workflow_run:
+    workflows: ["Version Dispatch Workflow"]
+    types:
+      - completed
 
 jobs:
   echo-version:
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
-      - name: Echo Version
+      - name: Download Version Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: version-artifact
+          run-id: ${{ github.event.workflow_run.id }}
+      - name: Read and Echo Version
         run: |
-          echo "Echoing version: ${{ github.event.inputs.version }}"
+          VERSION=$(cat version.txt)
+          echo "Echoing version: $VERSION"
