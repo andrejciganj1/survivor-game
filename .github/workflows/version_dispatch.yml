@@ -11,16 +11,11 @@ on:
 jobs:
   process-version:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      actions: write
-      id-token: write
-      repository: write 
     steps:
       - name: Store version in repository variable
         env:
           MY_VERSION: ${{ github.event.inputs.version }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
-          echo "$MY_VERSION" | gh variable set WORKFLOW_VERSION --repo="${{ github.repository }}"
+          echo "$MY_VERSION" | gh variable set WORKFLOW_VERSION --repo="${{ github.repository }}" --token="$PAT_TOKEN"
         shell: bash
