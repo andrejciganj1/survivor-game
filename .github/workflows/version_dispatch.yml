@@ -17,6 +17,5 @@ jobs:
           MY_VERSION: ${{ github.event.inputs.version }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "$MY_VERSION"
-          gh variable set WORKFLOW_VERSION "$MY_VERSION" --repo ${{ github.repository }}
+          echo "$MY_VERSION" | gh variable set WORKFLOW_VERSION --repo="${{ github.repository }}"
         shell: bash
