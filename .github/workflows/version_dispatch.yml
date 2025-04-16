@@ -15,6 +15,7 @@ jobs:
       contents: write
       actions: write
       id-token: write
+      repository: write 
     steps:
       - name: Store version in repository variable
         env:
