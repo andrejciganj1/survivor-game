@@ -1,0 +1,16 @@
+name: Echo Version Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number to echo'
+        required: true
+        type: string
+
+jobs:
+  echo-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo Version
+        run: echo "Echoing version: ${{ github.event.inputs.version }}"
